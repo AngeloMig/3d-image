@@ -1,3 +1,4 @@
+import type { ComponentChildren } from 'preact';
 import { useRef, useState } from 'preact/hooks';
 import {
   FONTS,
@@ -7,7 +8,11 @@ import {
   formatCm,
   normalizeText,
   validateText,
+  STITCH_STYLES,
+  findStitchStyle,
+  type FeeCode,
   type ImageDesign,
+  type StitchStyle,
   type TextAlignment,
   type TextDesign,
 } from '@embroidery/shared';
@@ -36,11 +41,21 @@ interface Props {
   onImageScale: (scale: number) => void;
   onUpload: (file: File) => Promise<string | null>;
   onRemoveImage: () => void;
+  /** Remove (tolerance 0–100) or restore (null) the uploaded logo's background. */
+  onBackground: (tolerance: number | null) => Promise<string | null>;
+  /** Rendered above the design editor (multi-design list). */
+  header?: ComponentChildren;
+  onStitchStyle: (style: StitchStyle) => void;
+  /** "+$4.00" for a fee code, or null when it's free / not priced. */
+  priceHint: (code: FeeCode) => string | null;
+  /** e.g. "Medium size · +$3.00" for the current design. */
+  sizeHint: string | null;
 }
 
 export function DesignStep(p: Props) {
   return (
     <div class="emb-stack">
+      {p.header}
       <Choice
         label="Design type"
         hideLabel
@@ -69,6 +84,35 @@ export function DesignStep(p: Props) {
           },
         ]}
       />
+      <Choice
+        label="Embroidery style"
+        value={(p.activeDesign === 'image' ? p.image?.stitchStyle : p.text.stitchStyle) ?? 'flat'}
+        variant="pills"
+        testId="style-choice"
+        onChange={p.onStitchStyle}
+        options={STITCH_STYLES.map((st) => {
+          const hint = st.id === 'flat' ? null : p.priceHint(`style_${st.id}` as FeeCode);
+          return {
+            value: st.id,
+            label: st.label,
+            title: st.description,
+            content: (
+              <>
+                <span class={`emb-style-swatch emb-style-swatch--${st.id}`} aria-hidden="true" />
+                <span class="emb-choice__label">{st.label}</span>
+                {hint ? <span class="emb-price-tag">{hint}</span> : null}
+              </>
+            ),
+          };
+        })}
+      />
+      <p class="emb-field__hint emb-style-hint">
+        {
+          findStitchStyle(
+            (p.activeDesign === 'image' ? p.image?.stitchStyle : p.text.stitchStyle) ?? 'flat',
+          ).description
+        }
+      </p>
       {p.activeDesign === 'text' ? <TextPanel {...p} /> : <ImagePanel {...p} />}
     </div>
   );
@@ -116,7 +160,7 @@ function TextPanel(p: Props) {
       <Choice
         label="Font"
         value={p.text.fontId}
-        variant="cards"
+        variant="pills"
         testId="font-choice"
         onChange={(fontId) => p.onText({ fontId })}
         options={fonts.map((f) => ({
@@ -125,12 +169,14 @@ function TextPanel(p: Props) {
           content: (
             <>
               <span
-                class="emb-font-sample"
+                class="emb-choice__label emb-font-name"
                 style={{ fontFamily: cssFontFamily(f), fontWeight: f.weight }}
               >
-                {f.sample}
+                {f.label}
               </span>
-              <span class="emb-choice__label">{f.label}</span>
+              {f.premium && p.priceHint('font_premium') ? (
+                <span class="emb-price-tag">{p.priceHint('font_premium')}</span>
+              ) : null}
             </>
           ),
         }))}
@@ -168,6 +214,7 @@ function TextPanel(p: Props) {
           step={0.1}
           format={formatCm}
           testId="text-size"
+          hint={p.sizeHint ?? undefined}
           onInput={(sizeCm) => p.onText({ sizeCm })}
         />
         <Slider
@@ -199,6 +246,62 @@ function TextPanel(p: Props) {
         ]}
       />
     </>
+  );
+}
+
+function BackgroundControl(p: Props) {
+  const [tolerance, setTolerance] = useState(30);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  if (!p.image) return null;
+  const run = async (value: number | null) => {
+    setBusy(true);
+    setMessage(await p.onBackground(value));
+    setBusy(false);
+  };
+  const removed = !!p.image.backgroundRemoved;
+  return (
+    <div class="emb-bg" data-testid="background-control">
+      <div class="emb-section-head">
+        <p class="emb-field__label">Background</p>
+        {removed ? (
+          <button
+            type="button"
+            class="emb-btn emb-btn--ghost emb-btn--sm"
+            disabled={busy}
+            onClick={() => void run(null)}
+          >
+            Restore original
+          </button>
+        ) : null}
+      </div>
+      {removed ? (
+        <Slider
+          label="Removal strength"
+          value={tolerance}
+          min={5}
+          max={80}
+          step={1}
+          format={(v) => `${v}%`}
+          hint="Increase if a halo remains; decrease if parts of the logo disappear."
+          onInput={(v) => setTolerance(v)}
+        />
+      ) : null}
+      <button
+        type="button"
+        class="emb-btn emb-btn--secondary emb-btn--sm"
+        disabled={busy}
+        data-testid="remove-background"
+        onClick={() => void run(tolerance)}
+      >
+        {busy ? 'Working…' : removed ? 'Apply strength' : 'Remove background'}
+      </button>
+      {message ? (
+        <p class="emb-field__hint" role="status">
+          {message}
+        </p>
+      ) : null}
+    </div>
   );
 }
 
@@ -294,6 +397,7 @@ function ImagePanel(p: Props) {
           {error}
         </p>
       ) : null}
+      <BackgroundControl {...p} />
       {p.image ? (
         <Slider
           label="Artwork size"
@@ -303,6 +407,7 @@ function ImagePanel(p: Props) {
           step={0.01}
           format={(v) => `${Math.round(v * 100)}% of area`}
           testId="image-scale"
+          hint={p.sizeHint ?? undefined}
           onInput={p.onImageScale}
         />
       ) : null}

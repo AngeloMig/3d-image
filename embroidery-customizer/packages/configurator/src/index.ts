@@ -12,3 +12,5 @@ export { DemoPersistence } from './persistence/demoPersistence';
 export { AppProxyPersistence } from './persistence/appProxyPersistence';
 export type { PersistenceAdapter } from './persistence/types';
 export * from './state/editorState';
+export { sharedRefFromUrl, shareUrl, listSavedDesigns, SHARE_PARAM } from './state/savedDesigns';
+export { floodRemoveBackground, removeBackground } from './engine/backgroundRemoval';

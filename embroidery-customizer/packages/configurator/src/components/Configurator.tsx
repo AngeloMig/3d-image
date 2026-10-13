@@ -2,40 +2,76 @@ import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'p
 import {
   FONTS,
   LIMITS,
+  NO_PRICING,
   THREAD_COLORS,
+  SIZE_TIERS,
   availablePlacements,
   checkUpload,
+  createId,
+  feePrice,
   findThreadColor,
+  formatMoney,
   getPreset,
   getSurface,
   imageIntrinsicSize,
+  positionsConflict,
+  priceBreakdown,
+  sizeTier,
   resolveGarmentColor,
   resolvePlacement,
   textLines,
   validateConfiguration,
   type EmbroideryConfiguration,
+  type FeeCode,
   type ModelAdapter,
   type PlacementId,
+  type PriceBreakdown,
+  type PricingSettings,
   type ProductContext,
+  type RenderedDimensions,
   type ResolvedPlacement,
   type ValidationIssue,
 } from '@embroidery/shared';
-import { buildLineItemProperties, type CartAdapter, type CartLine } from '@embroidery/shopify-cart';
+import {
+  buildLineItemProperties,
+  type AddItemInput,
+  type CartAdapter,
+  type CartLine,
+  type FeeInput,
+} from '@embroidery/shopify-cart';
+import { removeBackground } from '../engine/backgroundRemoval';
 import { DesignRasterizer, type RasterResult } from '../engine/designRasterizer';
-import { ensureFont } from '../engine/fonts';
+import { ensureFont, ensureUiFont } from '../engine/fonts';
 import type { GarmentInfo, GarmentViewer } from '../engine/garmentViewer';
 import type { PersistenceAdapter } from '../persistence/types';
 import {
   STEPS,
+  activeLayer,
   buildConfiguration,
   editorReducer,
+  freePositions,
   initialEditorState,
+  layerDesign,
+  productSelection,
+  variantForOption,
+  type EditorLayer,
+  type EditorState,
   type StepIndex,
 } from '../state/editorState';
+import {
+  forgetDesign,
+  listSavedDesigns,
+  rememberDesign,
+  shareUrl,
+  type SavedDesign,
+} from '../state/savedDesigns';
 import { DesignStep } from './DesignStep';
+import { LayerBar, layerTitle } from './LayerBar';
 import { PlacementStep } from './PlacementStep';
 import { ProductStep, isColorOption } from './ProductStep';
-import { ReviewStep } from './ReviewStep';
+import { ReviewStep, type ReviewLayer } from './ReviewStep';
+import { TeamOrderPanel, newTeamRow, type TeamRow } from './TeamOrderPanel';
+import { PriceBar } from './PriceBar';
 import { Viewer } from './Viewer';
 import { Notice } from './controls';
 import { IconBag, IconCheck } from './icons';
@@ -43,6 +79,10 @@ import { IconBag, IconCheck } from './icons';
 export interface ConfiguratorSettings {
   heading: string;
   subtitle: string;
+  /** Visual theme: 'clean' (subtle, inherits the shop font), 'atelier' (warm serif) or 'sport'. */
+  theme: 'clean' | 'atelier' | 'sport';
+  /** Show a Clean / Sport / Atelier switch (client previews). */
+  themeSwitcher: boolean;
   defaultText: string;
   defaultPositionId: PlacementId;
   defaultThreadColorId: string;
@@ -56,12 +96,17 @@ export interface ConfiguratorSettings {
   afterAdd: 'stay' | 'cart';
   cartUrl: string | null;
   sellingPlanId: string | null;
+  /** Max designs per item (1 disables multi-design). */
+  maxDesigns: number;
+  teamOrders: boolean;
+  sharing: boolean;
 }
 
 export const DEFAULT_SETTINGS: ConfiguratorSettings = {
-  heading: 'Customize Your Embroidery',
-  subtitle:
-    'Add a name, initials or your logo — see it stitched onto the garment in 3D before you order.',
+  theme: 'clean',
+  themeSwitcher: false,
+  heading: 'Make it yours.',
+  subtitle: 'Your name, your logo, your style. Create a piece that’s personal.',
   defaultText: 'YOUR NAME',
   defaultPositionId: 'left_chest',
   defaultThreadColorId: 'white',
@@ -73,6 +118,9 @@ export const DEFAULT_SETTINGS: ConfiguratorSettings = {
   afterAdd: 'stay',
   cartUrl: null,
   sellingPlanId: null,
+  maxDesigns: LIMITS.maxDesigns,
+  teamOrders: true,
+  sharing: true,
 };
 
 export interface EditRequest {
@@ -89,10 +137,14 @@ export interface ConfiguratorProps {
   cart: CartAdapter;
   persistence: PersistenceAdapter;
   settings?: Partial<ConfiguratorSettings>;
+  /** Embroidery fees (charged as fee-product cart lines). Omit for no fees. */
+  pricing?: PricingSettings;
   initialVariantId?: string | null;
   /** Variant chosen in the theme's own picker (kept in sync one-way). */
   externalVariantId?: string | null;
   edit?: EditRequest | null;
+  /** Saved/shared design reference to open (e.g. from `?embroidery_design=` in the URL). */
+  sharedDesignRef?: string | null;
   onAdded?: (line: CartLine) => void;
   onUpdated?: (line: CartLine) => void;
   onCancelEdit?: () => void;
@@ -105,6 +157,15 @@ interface Toast {
   showCart?: boolean;
 }
 
+/** A message meant for the customer (validation), not an unexpected failure. */
+class UserFacingError extends Error {}
+
+interface LayerLayout {
+  layerId: string;
+  resolved: ResolvedPlacement | null;
+  raster: RasterResult | null;
+}
+
 const STEP_TITLES = [
   'Choose your garment',
   'Create your design',
@@ -113,9 +174,9 @@ const STEP_TITLES = [
 ];
 const STEP_INTROS = [
   'Pick a size and colour. The 3D preview updates instantly.',
-  'Type your text or upload a logo. It appears on the shirt as you edit.',
-  'Choose where it’s stitched, then fine-tune the position.',
-  'Check every detail before adding it to your cart.',
+  'Type your text or upload a logo. Add more designs for other positions.',
+  'Choose where each design is stitched, then fine-tune the position.',
+  'Check every detail, then add one item or a whole team order.',
 ];
 
 function relativeLuminance(hex: string): number {
@@ -145,38 +206,46 @@ function decodeImage(url: string): Promise<HTMLImageElement> {
   });
 }
 
-/** Decoded artwork, downscaled for texture use (keeps memory bounded on phones). */
-function useArtwork(url: string | null): CanvasImageSource | null {
-  const [img, setImg] = useState<CanvasImageSource | null>(null);
+async function decodeForTexture(url: string): Promise<CanvasImageSource> {
+  const el = await decodeImage(url);
+  const max = 1600; // keeps memory bounded on phones
+  const scale = Math.min(1, max / Math.max(el.naturalWidth, el.naturalHeight));
+  if (scale >= 1) return el;
+  const c = document.createElement('canvas');
+  c.width = Math.round(el.naturalWidth * scale);
+  c.height = Math.round(el.naturalHeight * scale);
+  c.getContext('2d')?.drawImage(el, 0, 0, c.width, c.height);
+  return c;
+}
+
+/** Decoded artwork for every layer, keyed by preview URL. */
+function useArtworkMap(urls: string[]): Map<string, CanvasImageSource> {
+  const [map, setMap] = useState(() => new Map<string, CanvasImageSource>());
+  const key = urls.join('|');
   useEffect(() => {
-    if (!url) {
-      setImg(null);
-      return;
-    }
     let alive = true;
-    decodeImage(url)
-      .then((el) => {
-        if (!alive) return;
-        const max = 1600;
-        const scale = Math.min(1, max / Math.max(el.naturalWidth, el.naturalHeight));
-        if (scale >= 1) return setImg(el);
-        const c = document.createElement('canvas');
-        c.width = Math.round(el.naturalWidth * scale);
-        c.height = Math.round(el.naturalHeight * scale);
-        c.getContext('2d')?.drawImage(el, 0, 0, c.width, c.height);
-        setImg(c);
-      })
-      .catch(() => alive && setImg(null));
+    void Promise.all(
+      urls.map(
+        async (u) => [u, map.get(u) ?? (await decodeForTexture(u).catch(() => null))] as const,
+      ),
+    ).then((entries) => {
+      if (alive) setMap(new Map(entries.filter((e): e is [string, CanvasImageSource] => !!e[1])));
+    });
     return () => {
       alive = false;
     };
-  }, [url]);
-  return img;
+  }, [key]);
+  return map;
 }
+
+const sizeOptionOf = (product: ProductContext) =>
+  product.options.find((o) => /size/i.test(o.name))?.name ?? null;
 
 export function Configurator(props: ConfiguratorProps) {
   const { adapter, product, cart, persistence, mode } = props;
   const settings = useMemo(() => ({ ...DEFAULT_SETTINGS, ...props.settings }), [props.settings]);
+  const pricing = props.pricing ?? NO_PRICING;
+  const maxDesigns = Math.max(1, Math.min(LIMITS.maxDesigns, settings.maxDesigns));
   const reducer = useMemo(() => editorReducer(adapter), [adapter]);
   const makeInitial = useCallback(
     () =>
@@ -189,6 +258,7 @@ export function Configurator(props: ConfiguratorProps) {
     [adapter, product, props.modelUrl, props.initialVariantId, settings],
   );
   const [state, dispatch] = useReducer(reducer, undefined, makeInitial);
+  const layer = activeLayer(state);
 
   const viewerRef = useRef<GarmentViewer | null>(null);
   const [viewerReady, setViewerReady] = useState(false);
@@ -199,24 +269,72 @@ export function Configurator(props: ConfiguratorProps) {
   const [thumbnail, setThumbnail] = useState<string | null>(null);
   const [confirmReset, setConfirmReset] = useState(false);
   const [stepError, setStepError] = useState<string | null>(null);
-  const rasterizer = useMemo(() => new DesignRasterizer(), []);
+  const [orderMode, setOrderMode] = useState<'single' | 'team'>('single');
+  const sizeOption = sizeOptionOf(product);
+  const [teamRows, setTeamRows] = useState<TeamRow[]>(() => [
+    newTeamRow(sizeOption ? (state.product.options[sizeOption] ?? '') : ''),
+  ]);
+  const [share, setShare] = useState<{ busy: boolean; url: string | null; message: string | null }>(
+    {
+      busy: false,
+      url: null,
+      message: null,
+    },
+  );
+  const [saved, setSaved] = useState<SavedDesign[]>(() =>
+    settings.sharing ? listSavedDesigns() : [],
+  );
+  const rasterizers = useRef(new Map<string, DesignRasterizer>());
+  const layoutCache = useRef(new Map<string, { sig: string; value: LayerLayout }>());
+  /** Original upload per object URL, plus the original for logos whose background was removed. */
   const files = useRef(new Map<string, File>());
+  const originals = useRef(
+    new Map<string, { file: File; url: string; width: number; height: number }>(),
+  );
   const headingRef = useRef<HTMLHeadingElement>(null);
   const firstRender = useRef(true);
   const dragStart = useRef<{ x: number; y: number } | null>(null);
 
-  /* ---------------- fonts: load once, re-render the texture when each arrives ---------------- */
+  const THEME_KEY = 'embroidery-theme-choice';
+  const [themeChoice, setThemeChoice] = useState<ConfiguratorSettings['theme']>(() => {
+    if (!settings.themeSwitcher) return settings.theme;
+    try {
+      const saved = localStorage.getItem(THEME_KEY);
+      return saved === 'clean' || saved === 'sport' || saved === 'atelier' ? saved : settings.theme;
+    } catch {
+      return settings.theme;
+    }
+  });
+  useEffect(() => {
+    if (!settings.themeSwitcher) setThemeChoice(settings.theme);
+  }, [settings.theme, settings.themeSwitcher]);
+  const theme = settings.themeSwitcher ? themeChoice : settings.theme;
+  const chooseTheme = (t: ConfiguratorSettings['theme']) => {
+    setThemeChoice(t);
+    try {
+      localStorage.setItem(THEME_KEY, t);
+    } catch {
+      /* private mode */
+    }
+  };
+  useEffect(() => void ensureUiFont(theme), [theme]);
+
+  /* ---------------- fonts: selected ones first, the full list when the Design step opens ---------------- */
+  const fontKey = state.layers.map((l) => l.text.fontId).join(',');
   useEffect(() => {
     let alive = true;
-    FONTS.filter((f) => settings.fontIds.includes(f.id)).forEach(
+    const ids = new Set(
+      state.step === 1 ? settings.fontIds : state.layers.map((l) => l.text.fontId),
+    );
+    FONTS.filter((f) => ids.has(f.id) && settings.fontIds.includes(f.id)).forEach(
       (f) => void ensureFont(f).then(() => alive && setFontsTick((t) => t + 1)),
     );
     return () => {
       alive = false;
     };
-  }, [settings.fontIds]);
+  }, [settings.fontIds, fontKey, state.step === 1]);
 
-  /* ---------------- edit-in-cart: load saved configuration ---------------- */
+  /* ---------------- open a cart line for editing / a shared design ---------------- */
   useEffect(() => {
     if (!props.edit) return;
     dispatch({
@@ -224,113 +342,178 @@ export function Configurator(props: ConfiguratorProps) {
       config: props.edit.config,
       editing: { lineKey: props.edit.lineKey, customizationId: props.edit.customizationId },
     });
+    setOrderMode('single');
     setToast({
       tone: 'info',
       message: 'Loaded your saved design. Make changes, then update your cart item.',
     });
   }, [props.edit]);
 
-  // Stored artwork (edit mode) needs a fresh same-origin preview URL.
-  const storageRef = state.image?.storageRef ?? null;
-  const hasPreview = !!state.image?.previewUrl;
+  const openSaved = useCallback(
+    async (ref: string, silent = false) => {
+      try {
+        const config = await persistence.loadConfiguration(ref);
+        dispatch({ type: 'load', config, editing: null, asNew: true });
+        if (!silent)
+          setToast({
+            tone: 'success',
+            message: 'Design loaded. Adjust anything, then add it to your cart.',
+          });
+        else setToast({ tone: 'info', message: 'Shared design loaded.' });
+      } catch (e) {
+        setToast({
+          tone: 'error',
+          message: e instanceof Error ? e.message : 'That design could not be opened.',
+        });
+      }
+    },
+    [persistence],
+  );
   useEffect(() => {
-    if (!storageRef || hasPreview) return;
+    if (props.sharedDesignRef) void openSaved(props.sharedDesignRef, true);
+  }, [props.sharedDesignRef, openSaved]);
+
+  // Stored artwork (edit / shared designs) needs a fresh same-origin preview URL.
+  const missingPreviews = state.layers
+    .filter((l) => l.image?.storageRef && !l.image.previewUrl)
+    .map((l) => [l.id, l.image!.storageRef!] as const);
+  const missingKey = missingPreviews.map((m) => m.join(':')).join('|');
+  useEffect(() => {
+    if (!missingPreviews.length) return;
     let alive = true;
-    persistence
-      .resolveArtworkUrl(storageRef)
-      .then((previewUrl) => alive && dispatch({ type: 'updateImage', patch: { previewUrl } }))
-      .catch((e: Error) => alive && setToast({ tone: 'error', message: e.message }));
+    for (const [layerId, ref] of missingPreviews) {
+      persistence
+        .resolveArtworkUrl(ref)
+        .then(
+          (previewUrl) =>
+            alive && dispatch({ type: 'updateImage', layerId, patch: { previewUrl } }),
+        )
+        .catch((e: Error) => alive && setToast({ tone: 'error', message: e.message }));
+    }
     return () => {
       alive = false;
     };
-  }, [storageRef, hasPreview, persistence]);
+  }, [missingKey, persistence]);
 
   useEffect(() => {
     if (props.externalVariantId)
       dispatch({ type: 'selectVariant', variantId: props.externalVariantId, product });
   }, [props.externalVariantId, product]);
 
-  // Revoke object URLs we created when unmounting.
   useEffect(
     () => () => {
       files.current.forEach((_, url) => URL.revokeObjectURL(url));
-      files.current.clear();
+      originals.current.forEach((o) => URL.revokeObjectURL(o.url));
     },
     [],
   );
 
-  /* ---------------- design → bitmap → resolved placement ---------------- */
-  const artwork = useArtwork(
-    state.activeDesign === 'image' ? (state.image?.previewUrl ?? null) : null,
-  );
+  /* ---------------- designs → bitmaps → resolved placements ---------------- */
+  const artworkUrls = state.layers
+    .filter((l) => l.activeDesign === 'image' && l.image?.previewUrl)
+    .map((l) => l.image!.previewUrl!);
+  const artworks = useArtworkMap(artworkUrls);
 
-  const layout = useMemo((): {
-    resolved: ResolvedPlacement;
-    raster: RasterResult | null;
-  } | null => {
-    try {
-      const preset = getPreset(adapter, state.placement.positionId);
-      if (!preset) return null;
-      if (state.activeDesign === 'text') {
-        if (textLines(state.text.text).length === 0) return null;
-        const resolved = resolvePlacement(
-          adapter,
-          state.placement,
-          rasterizer.measureTextSize(state.text),
-        );
+  const rasterizerFor = (id: string) => {
+    let r = rasterizers.current.get(id);
+    if (!r) {
+      r = new DesignRasterizer();
+      rasterizers.current.set(id, r);
+    }
+    return r;
+  };
+
+  const computeLayout = useCallback(
+    (l: EditorLayer): LayerLayout => {
+      const rasterizer = rasterizerFor(l.id);
+      const preset = getPreset(adapter, l.placement.positionId);
+      if (!preset) return { layerId: l.id, resolved: null, raster: null };
+      if (l.activeDesign === 'text' || !l.image) {
+        if (l.activeDesign === 'image' || textLines(l.text.text).length === 0)
+          return { layerId: l.id, resolved: null, raster: null };
+        const resolved = resolvePlacement(adapter, l.placement, rasterizer.measureTextSize(l.text));
         return {
+          layerId: l.id,
           resolved,
-          raster: rasterizer.renderText(state.text, resolved.widthCm, resolved.heightCm),
+          raster: rasterizer.renderText(l.text, resolved.widthCm, resolved.heightCm),
         };
       }
-      if (!state.image) return null;
-      const resolved = resolvePlacement(
-        adapter,
-        state.placement,
-        imageIntrinsicSize(preset, state.image),
-      );
+      const resolved = resolvePlacement(adapter, l.placement, imageIntrinsicSize(preset, l.image));
+      const art = l.image.previewUrl ? artworks.get(l.image.previewUrl) : undefined;
       return {
+        layerId: l.id,
         resolved,
-        raster: artwork
-          ? rasterizer.renderImage(artwork, resolved.widthCm, resolved.heightCm)
+        raster: art
+          ? rasterizer.renderImage(
+              art,
+              resolved.widthCm,
+              resolved.heightCm,
+              l.image.stitchStyle ?? 'flat',
+            )
           : null,
       };
-    } catch (error) {
-      console.error('[embroidery] layout failed', error);
-      return null;
-    }
-    // fontsTick: re-measure once web fonts arrive
-  }, [
-    adapter,
-    rasterizer,
-    state.activeDesign,
-    state.text,
-    state.image,
-    state.placement,
-    artwork,
-    fontsTick,
-  ]);
+    },
+    [adapter, artworks],
+  );
+
+  const layouts = useMemo((): LayerLayout[] => {
+    const cache = layoutCache.current;
+    const ids = new Set(state.layers.map((l) => l.id));
+    for (const id of [...cache.keys()]) if (!ids.has(id)) cache.delete(id);
+    for (const id of [...rasterizers.current.keys()])
+      if (!ids.has(id)) rasterizers.current.delete(id);
+    return state.layers.map((l) => {
+      // Re-rasterize only layers that changed, so editing one design doesn't re-upload the others.
+      const art = l.image?.previewUrl ? artworks.has(l.image.previewUrl) : false;
+      const sig = JSON.stringify([l.activeDesign, l.text, l.image, l.placement, art, fontsTick]);
+      const hit = cache.get(l.id);
+      if (hit && hit.sig === sig) return hit.value;
+      try {
+        const value = computeLayout(l);
+        cache.set(l.id, { sig, value });
+        return value;
+      } catch (error) {
+        console.error('[embroidery] layout failed', error);
+        return { layerId: l.id, resolved: null, raster: null };
+      }
+    });
+  }, [state.layers, artworks, fontsTick, computeLayout]);
+  const layoutOf = (id: string) => layouts.find((x) => x.layerId === id) ?? null;
+  const activeLayout = layoutOf(layer.id);
+
+  const renderedMap = useMemo(() => {
+    const out: Record<string, RenderedDimensions | null> = {};
+    for (const x of layouts)
+      out[x.layerId] = x.resolved
+        ? { widthCm: x.resolved.widthCm, heightCm: x.resolved.heightCm, fitted: x.resolved.fitted }
+        : null;
+    return out;
+  }, [layouts]);
 
   /* ---------------- push to the 3D viewer ---------------- */
   useEffect(() => {
     const viewer = viewerRef.current;
     if (!viewer || !viewerReady) return;
-    if (!layout?.raster) {
-      viewer.setDecal(null);
-      return;
-    }
-    const surface = getSurface(adapter, layout.resolved.preset.surfaceId);
-    if (!surface) return;
-    viewer.setDecal({
-      canvas: layout.raster.canvas,
-      version: layout.raster.version,
-      surface,
-      center: layout.resolved.center,
-      widthCm: layout.raster.canvasWidthCm,
-      heightCm: layout.raster.canvasHeightCm,
-      rotationDeg: state.placement.rotationDeg,
-    });
-  }, [layout, viewerReady, adapter, state.placement.rotationDeg]);
+    viewer.setDecals(
+      layouts.flatMap((x) => {
+        const l = state.layers.find((y) => y.id === x.layerId);
+        const surface = x.resolved && getSurface(adapter, x.resolved.preset.surfaceId);
+        if (!l || !x.raster || !x.resolved || !surface) return [];
+        return [
+          {
+            id: x.layerId,
+            canvas: x.raster.canvas,
+            version: x.raster.version,
+            surface,
+            center: x.resolved.center,
+            widthCm: x.raster.canvasWidthCm,
+            heightCm: x.raster.canvasHeightCm,
+            rotationDeg: l.placement.rotationDeg,
+          },
+        ];
+      }),
+    );
+  }, [layouts, viewerReady, adapter]);
 
   const colorOption = product.options.find((o) => isColorOption(o.name));
   const garmentHex = resolveGarmentColor(
@@ -341,9 +524,8 @@ export function Configurator(props: ConfiguratorProps) {
     if (viewerReady) viewerRef.current?.setGarmentColor(garmentHex ?? null);
   }, [garmentHex, viewerReady]);
 
-  // Turn the garment to face the chosen surface.
-  const surfaceId =
-    layout?.resolved.preset.surfaceId ?? getPreset(adapter, state.placement.positionId)?.surfaceId;
+  // Turn the garment to face the selected design's surface.
+  const surfaceId = getPreset(adapter, layer.placement.positionId)?.surfaceId;
   const facingSurface = surfaceId === 'back' ? 'back' : surfaceId === 'front' ? 'front' : null;
   const lastSurface = useRef(facingSurface);
   useEffect(() => {
@@ -356,7 +538,6 @@ export function Configurator(props: ConfiguratorProps) {
     viewerRef.current?.setDragEnabled(viewerReady && state.step === 2);
   }, [state.step, viewerReady]);
 
-  // Move focus to the step heading for keyboard / screen-reader users (not on first paint).
   useEffect(() => {
     if (firstRender.current) {
       firstRender.current = false;
@@ -364,9 +545,8 @@ export function Configurator(props: ConfiguratorProps) {
     }
     headingRef.current?.focus({ preventScroll: true });
     setStepError(null);
-    if (state.step === 3 && viewerRef.current) {
+    if (state.step === 3 && viewerRef.current)
       setThumbnail(viewerRef.current.capture(420, facingSurface ?? 'front'));
-    }
   }, [state.step]);
 
   useEffect(() => {
@@ -375,22 +555,27 @@ export function Configurator(props: ConfiguratorProps) {
     return () => clearTimeout(t);
   }, [confirmReset]);
 
-  /* ---------------- derived validation ---------------- */
-  const rendered = layout
-    ? {
-        widthCm: layout.resolved.widthCm,
-        heightCm: layout.resolved.heightCm,
-        fitted: layout.resolved.fitted,
-      }
-    : null;
+  /* ---------------- validation + pricing ---------------- */
   const issues: ValidationIssue[] = useMemo(() => {
-    if (state.activeDesign === 'image' && !state.image)
-      return [{ field: 'image', message: 'Upload your logo or image, or switch to text.' }];
-    const list = validateConfiguration(adapter, buildConfiguration(state, rendered));
-    if (!settings.positionIds.includes(state.placement.positionId))
-      list.push({ field: 'positionId', message: 'Choose one of the offered positions.' });
-    return list;
-  }, [state, rendered?.widthCm, rendered?.heightCm, adapter, settings.positionIds]);
+    const many = state.layers.length > 1;
+    const list: ValidationIssue[] = [];
+    state.layers.forEach((l, i) => {
+      if (l.activeDesign === 'image' && !l.image)
+        list.push({
+          field: 'image',
+          layer: i,
+          message: `${many ? `Design ${i + 1}: ` : ''}Upload your logo or image, or switch to text.`,
+        });
+      if (!settings.positionIds.includes(l.placement.positionId))
+        list.push({
+          field: 'positionId',
+          layer: i,
+          message: 'Choose one of the offered positions.',
+        });
+    });
+    if (list.length) return list;
+    return validateConfiguration(adapter, buildConfiguration(state, renderedMap));
+  }, [state, renderedMap, adapter, settings.positionIds]);
 
   const designIssues = issues.filter(
     (i) =>
@@ -405,12 +590,83 @@ export function Configurator(props: ConfiguratorProps) {
       ].includes(i.field),
   );
   const garmentContrastHex = garmentHex ?? garmentInfo?.originalColorHex ?? null;
-  const threadHex = findThreadColor(state.text.threadColorId)?.hex;
+  const threadHex = findThreadColor(layer.text.threadColorId)?.hex;
   const lowContrast = !!(
     garmentContrastHex &&
     threadHex &&
     contrastRatio(garmentContrastHex, threadHex) < 1.6
   );
+
+  const pricedDesigns = state.layers.map((l) => ({
+    design: layerDesign(l),
+    rendered: renderedMap[l.id] ?? null,
+  }));
+  const variant = product.variants.find((v) => v.id === state.product.variantId);
+  const textLayers = state.layers.filter((l) => l.activeDesign === 'text');
+  const [personalizedId, setPersonalizedId] = useState<string | null>(null);
+  // Default: a text design on the back (where team names usually go), else the first text design.
+  const personalizedLayer =
+    textLayers.find((l) => l.id === personalizedId) ??
+    textLayers.find((l) => getPreset(adapter, l.placement.positionId)?.surfaceId === 'back') ??
+    textLayers[0] ??
+    null;
+  const teamVariant = (row: TeamRow) =>
+    sizeOption ? variantForOption(product, state.product.options, sizeOption, row.size) : variant;
+  /** Designs for one team row: the personalized text is re-measured, since size tiers can change. */
+  const rowDesigns = (row: TeamRow) =>
+    state.layers.map((l) => {
+      if (!personalizedLayer || l.id !== personalizedLayer.id || !row.text.trim())
+        return { design: layerDesign(l), rendered: renderedMap[l.id] ?? null };
+      const text = { ...l.text, text: row.text.trim() };
+      const resolved = resolvePlacement(
+        adapter,
+        l.placement,
+        rasterizerFor(l.id).measureTextSize(text),
+      );
+      return { design: text, rendered: { widthCm: resolved.widthCm, heightCm: resolved.heightCm } };
+    });
+  // Recomputed on every render: cheap, and always in sync with size / font / style / logo changes.
+  const breakdown: PriceBreakdown = (() => {
+    if (orderMode === 'team' && !state.editing) {
+      const parts = teamRows.map((r) =>
+        priceBreakdown(rowDesigns(r), teamVariant(r)?.price ?? 0, r.quantity, pricing),
+      );
+      const first = parts[0] ?? priceBreakdown(pricedDesigns, variant?.price ?? 0, 1, pricing);
+      return {
+        ...first,
+        quantity: parts.reduce((n, x) => n + x.quantity, 0),
+        total: parts.reduce((n, x) => n + x.total, 0),
+      };
+    }
+    return priceBreakdown(pricedDesigns, variant?.price ?? 0, state.product.quantity, pricing);
+  })();
+  const money = (n: number) => formatMoney(n, product.currency, product.locale);
+  const priceHint = (code: FeeCode) =>
+    feePrice(pricing, code) > 0 ? `+${money(feePrice(pricing, code))}` : null;
+  const activeRendered = renderedMap[layer.id] ?? null;
+  const sizeHint = (() => {
+    if (!activeRendered || (!feePrice(pricing, 'size_medium') && !feePrice(pricing, 'size_large')))
+      return null;
+    const tier = sizeTier(activeRendered);
+    if (tier === 'small') return `Small size (under ${SIZE_TIERS.mediumFromCm} cm) · included`;
+    if (tier === 'medium')
+      return `Medium size (${SIZE_TIERS.mediumFromCm}–${SIZE_TIERS.largeFromCm} cm) · ${priceHint('size_medium') ?? 'included'}`;
+    return `Large size (${SIZE_TIERS.largeFromCm} cm+) · ${priceHint('size_large') ?? 'included'}`;
+  })();
+
+  const feeInputs = (b: PriceBreakdown): FeeInput[] =>
+    b.fees
+      .filter((f) => f.variantId)
+      .map((f) => ({
+        kind: f.kind,
+        variantId: f.variantId!,
+        perItem: f.perItem,
+        meta: {
+          title: `Embroidery fee — ${f.label}`,
+          variantTitle: '',
+          price: f.unitPrice,
+        },
+      }));
 
   /* ---------------- handlers ---------------- */
   const onViewer = useCallback((viewer: GarmentViewer | null, info: GarmentInfo | null) => {
@@ -419,19 +675,32 @@ export function Configurator(props: ConfiguratorProps) {
     setViewerReady(!!viewer);
   }, []);
 
+  const stateRef = useRef<EditorState>(state);
+  stateRef.current = state;
   const onDesignDrag = useCallback(
-    (dx: number, dy: number, phase: 'start' | 'move' | 'end') => {
-      if (phase === 'start')
-        dragStart.current = { x: state.placement.offsetXCm, y: state.placement.offsetYCm };
-      else if (phase === 'move' && dragStart.current)
+    (dx: number, dy: number, phase: 'start' | 'move' | 'end', layerId: string) => {
+      const target = stateRef.current.layers.find((l) => l.id === layerId);
+      if (!target) return;
+      if (phase === 'start') {
+        dispatch({ type: 'selectLayer', layerId });
+        dragStart.current = { x: target.placement.offsetXCm, y: target.placement.offsetYCm };
+      } else if (phase === 'move' && dragStart.current)
         dispatch({
           type: 'updatePlacement',
+          layerId,
           patch: { offsetXCm: dragStart.current.x + dx, offsetYCm: dragStart.current.y + dy },
         });
       else dragStart.current = null;
     },
-    [state.placement.offsetXCm, state.placement.offsetYCm],
+    [],
   );
+
+  const releaseUrl = (url: string | null | undefined) => {
+    if (url && files.current.has(url)) {
+      URL.revokeObjectURL(url);
+      files.current.delete(url);
+    }
+  };
 
   const onUpload = async (file: File): Promise<string | null> => {
     const header = new Uint8Array(await file.slice(0, 16).arrayBuffer());
@@ -454,13 +723,10 @@ export function Configurator(props: ConfiguratorProps) {
       URL.revokeObjectURL(url);
       return `This image is ${w}×${h}px. Please keep it under ${LIMITS.maxImagePx}px on each side.`;
     }
-    const previous = state.image?.previewUrl;
-    if (previous && files.current.has(previous)) {
-      URL.revokeObjectURL(previous);
-      files.current.delete(previous);
-    }
+    releaseUrl(layer.image?.previewUrl);
+    originals.current.delete(layer.id);
     files.current.set(url, file);
-    const preset = getPreset(adapter, state.placement.positionId)!;
+    const preset = getPreset(adapter, layer.placement.positionId)!;
     dispatch({
       type: 'setImage',
       image: {
@@ -473,6 +739,7 @@ export function Configurator(props: ConfiguratorProps) {
         widthPx: w,
         heightPx: h,
         scale: Math.min(1, preset.defaultImageWidthCm / preset.maxWidthCm),
+        backgroundRemoved: false,
       },
     });
     setToast({
@@ -482,11 +749,80 @@ export function Configurator(props: ConfiguratorProps) {
     return null;
   };
 
+  /** Remove (tolerance) or restore (null) the active logo's background. Works from the original upload. */
+  const onBackground = async (tolerance: number | null): Promise<string | null> => {
+    const image = layer.image;
+    if (!image) return null;
+    const currentFile = image.previewUrl ? files.current.get(image.previewUrl) : undefined;
+    const original =
+      originals.current.get(layer.id) ??
+      (currentFile && !image.backgroundRemoved
+        ? {
+            file: currentFile,
+            url: image.previewUrl!,
+            width: image.widthPx,
+            height: image.heightPx,
+          }
+        : null);
+    if (!original) return 'Upload the logo again to change its background.';
+    if (tolerance === null) {
+      releaseUrl(image.previewUrl);
+      files.current.set(original.url, original.file);
+      originals.current.delete(layer.id);
+      dispatch({
+        type: 'updateImage',
+        patch: {
+          previewUrl: original.url,
+          storageRef: null,
+          mimeType: original.file.type as typeof image.mimeType,
+          byteSize: original.file.size,
+          widthPx: original.width,
+          heightPx: original.height,
+          backgroundRemoved: false,
+        },
+      });
+      return 'Original artwork restored.';
+    }
+    try {
+      const decoded = await decodeImage(original.url);
+      const result = await removeBackground(decoded, tolerance);
+      if (result.alreadyTransparent) return 'This image already has a transparent background.';
+      if (result.removed < 0.005) return 'No solid background colour was found around the edges.';
+      originals.current.set(layer.id, original);
+      files.current.delete(original.url); // keep the URL alive for "Restore", but it's no longer the upload
+      if (image.previewUrl !== original.url) releaseUrl(image.previewUrl);
+      const name = original.file.name.replace(/\.[^.]+$/, '') + '-no-background.png';
+      const file = new File([result.blob], name, { type: 'image/png' });
+      const url = URL.createObjectURL(file);
+      files.current.set(url, file);
+      dispatch({
+        type: 'updateImage',
+        patch: {
+          previewUrl: url,
+          storageRef: null,
+          mimeType: 'image/png',
+          byteSize: file.size,
+          widthPx: result.width,
+          heightPx: result.height,
+          backgroundRemoved: true,
+          originalFilename: original.file.name.slice(0, 120),
+        },
+      });
+      return `Background removed (${Math.round(result.removed * 100)}% of the image).`;
+    } catch (e) {
+      console.error('[embroidery] background removal failed', e);
+      return 'Sorry — the background could not be removed from this image.';
+    }
+  };
+
   const goTo = (step: StepIndex) => dispatch({ type: 'goTo', step });
 
   const next = () => {
     if (state.step === 1 && designIssues.length) {
-      setStepError(designIssues[0]!.message);
+      const first = designIssues[0]!;
+      if (first.layer !== undefined && state.layers[first.layer])
+        dispatch({ type: 'selectLayer', layerId: state.layers[first.layer]!.id });
+      setStepError(first.message);
       return;
     }
     if (state.step < 3) goTo((state.step + 1) as StepIndex);
@@ -499,8 +835,176 @@ export function Configurator(props: ConfiguratorProps) {
     }
     setConfirmReset(false);
     dispatch({ type: 'reset', state: makeInitial() });
+    setOrderMode('single');
     viewerRef.current?.setView('home');
     setToast({ tone: 'info', message: 'Customization reset to the default design.' });
+  };
+
+  /** Uploads any artwork not yet stored; returns the layers with storage refs filled in. */
+  const persistArtwork = async (): Promise<EditorLayer[]> => {
+    const out: EditorLayer[] = [];
+    for (const l of stateRef.current.layers) {
+      if (l.activeDesign !== 'image' || !l.image || l.image.storageRef) {
+        out.push(l);
+        continue;
+      }
+      setBusy('Saving artwork…');
+      const file = l.image.previewUrl ? files.current.get(l.image.previewUrl) : undefined;
+      if (!file) throw new Error('Please upload your artwork again.');
+      const stored = await persistence.uploadArtwork(file, {
+        filename: file.name,
+        mimeType: l.image.mimeType,
+      });
+      dispatch({ type: 'updateImage', layerId: l.id, patch: { storageRef: stored.storageRef } });
+      out.push({ ...l, image: { ...l.image, storageRef: stored.storageRef } });
+    }
+    return out;
+  };
+
+  const itemMeta = (variantTitle: string, price: number) => ({
+    title: product.title,
+    variantTitle,
+    price,
+    image: viewerRef.current?.capture(240, facingSurface ?? 'front') ?? null,
+  });
+
+  const submitSingle = async () => {
+    const layers = await persistArtwork();
+    setBusy('Saving design…');
+    const config = buildConfiguration(stateRef.current, renderedMap, { layers });
+    const { configRef } = await persistence.saveConfiguration(config);
+    const properties = buildLineItemProperties(config, { configRef });
+    const meta = itemMeta(variant?.title ?? '', variant?.price ?? 0);
+    const fees = feeInputs(breakdown);
+    setBusy(state.editing ? 'Updating cart…' : 'Adding to cart…');
+    if (state.editing) {
+      const line = await cart.updateCustomizedItem({
+        lineKey: state.editing.lineKey,
+        customizationId: state.editing.customizationId,
+        variantId: state.product.variantId,
+        quantity: state.product.quantity,
+        properties,
+        meta,
+        fees,
+      });
+      setToast({
+        tone: 'success',
+        message: 'Cart item updated with your new design.',
+        showCart: true,
+      });
+      dispatch({ type: 'committed' });
+      props.onUpdated?.(line);
+      return;
+    }
+    const line = await cart.addItem({
+      variantId: state.product.variantId,
+      quantity: state.product.quantity,
+      properties,
+      sellingPlanId: settings.sellingPlanId,
+      meta,
+      fees,
+    });
+    dispatch({ type: 'committed' });
+    props.onAdded?.(line);
+    if (settings.afterAdd === 'cart' && settings.cartUrl) {
+      window.location.href = settings.cartUrl;
+      return;
+    }
+    setToast({
+      tone: 'success',
+      message: `Added to ${mode === 'demo' ? 'demo ' : ''}cart. Your next change will be saved as a new item.`,
+      showCart: true,
+    });
+  };
+
+  const teamRowError = (row: TeamRow): string | null => {
+    const v = teamVariant(row);
+    if (!v) return 'This size isn’t available in the chosen colour.';
+    if (!v.available) return `${v.title} is sold out.`;
+    return null;
+  };
+
+  const submitTeam = async () => {
+    const rowIssues = teamRows
+      .map((r, i) => {
+        const e = teamRowError(r) ?? (personalizedLayer && !r.text.trim() ? 'Enter a name.' : null);
+        return e ? `Row ${i + 1}: ${e}` : null;
+      })
+      .filter((x): x is string => !!x);
+    if (rowIssues.length) throw new UserFacingError(rowIssues[0]);
+    const layers = await persistArtwork();
+    const teamOrderId = createId();
+    const inputs: AddItemInput[] = [];
+    let n = 0;
+    for (const row of teamRows) {
+      n += 1;
+      setBusy(`Saving ${n} of ${teamRows.length}…`);
+      const v = teamVariant(row)!;
+      const rowLayers = layers.map((l) =>
+        personalizedLayer && l.id === personalizedLayer.id
+          ? { ...l, text: { ...l.text, text: row.text.trim() } }
+          : l,
+      );
+      const rendered = { ...renderedMap };
+      for (const l of rowLayers) {
+        if (personalizedLayer && l.id === personalizedLayer.id) {
+          const resolved = resolvePlacement(
+            adapter,
+            l.placement,
+            rasterizerFor(l.id).measureTextSize(l.text),
+          );
+          rendered[l.id] = {
+            widthCm: resolved.widthCm,
+            heightCm: resolved.heightCm,
+            fitted: resolved.fitted,
+          };
+        }
+      }
+      const rowState: EditorState = {
+        ...stateRef.current,
+        product: productSelection(
+          product,
+          v,
+          state.product.modelId,
+          state.product.modelUrl,
+          row.quantity,
+        ),
+      };
+      const config = buildConfiguration(rowState, rendered, {
+        layers: rowLayers,
+        configurationId: createId(),
+        teamOrderId,
+      });
+      const issuesForRow = validateConfiguration(adapter, config);
+      if (issuesForRow.length) throw new UserFacingError(`Row ${n}: ${issuesForRow[0]!.message}`);
+      const { configRef } = await persistence.saveConfiguration(config);
+      const rowBreakdown = priceBreakdown(rowDesigns(row), v.price, row.quantity, pricing);
+      inputs.push({
+        variantId: v.id,
+        quantity: row.quantity,
+        properties: buildLineItemProperties(config, {
+          configRef,
+          teamPosition: `${n} of ${teamRows.length}`,
+        }),
+        meta: {
+          ...itemMeta(v.title, v.price),
+          title: `${product.title}${row.text ? ` — ${row.text.trim()}` : ''}`,
+        },
+        fees: feeInputs(rowBreakdown),
+      });
+    }
+    setBusy('Adding to cart…');
+    await cart.addItems(inputs);
+    dispatch({ type: 'committed' });
+    if (settings.afterAdd === 'cart' && settings.cartUrl) {
+      window.location.href = settings.cartUrl;
+      return;
+    }
+    setToast({
+      tone: 'success',
+      message: `Added ${inputs.length} personalized item${inputs.length === 1 ? '' : 's'} to your ${mode === 'demo' ? 'demo ' : ''}cart.`,
+      showCart: true,
+    });
   };
 
   const submit = async () => {
@@ -509,69 +1013,12 @@ export function Configurator(props: ConfiguratorProps) {
       return;
     }
     setToast(null);
+    setStepError(null);
     try {
-      let image = state.activeDesign === 'image' ? state.image : null;
-      if (image && !image.storageRef) {
-        setBusy('Saving artwork…');
-        const file = image.previewUrl ? files.current.get(image.previewUrl) : undefined;
-        if (!file) throw new Error('Please upload your artwork again.');
-        const stored = await persistence.uploadArtwork(file, {
-          filename: image.originalFilename,
-          mimeType: image.mimeType,
-        });
-        image = { ...image, storageRef: stored.storageRef };
-        dispatch({ type: 'updateImage', patch: { storageRef: stored.storageRef } });
-      }
-      setBusy('Saving design…');
-      const config = buildConfiguration({ ...state, image: image ?? state.image }, rendered);
-      const { configRef } = await persistence.saveConfiguration(config);
-      const properties = buildLineItemProperties(config, { configRef });
-      const variant = product.variants.find((v) => v.id === state.product.variantId);
-      const meta = {
-        title: product.title,
-        variantTitle: variant?.title ?? '',
-        price: variant?.price ?? 0,
-        image: viewerRef.current?.capture(240, facingSurface ?? 'front') ?? null,
-      };
-      setBusy(state.editing ? 'Updating cart…' : 'Adding to cart…');
-      if (state.editing) {
-        const line = await cart.updateCustomizedItem({
-          lineKey: state.editing.lineKey,
-          customizationId: state.editing.customizationId,
-          variantId: state.product.variantId,
-          quantity: state.product.quantity,
-          properties,
-          meta,
-        });
-        setToast({
-          tone: 'success',
-          message: 'Cart item updated with your new design.',
-          showCart: true,
-        });
-        dispatch({ type: 'committed' });
-        props.onUpdated?.(line);
-      } else {
-        const line = await cart.addItem({
-          variantId: state.product.variantId,
-          quantity: state.product.quantity,
-          properties,
-          sellingPlanId: settings.sellingPlanId,
-          meta,
-        });
-        dispatch({ type: 'committed' });
-        props.onAdded?.(line);
-        if (settings.afterAdd === 'cart' && settings.cartUrl) {
-          window.location.href = settings.cartUrl;
-          return;
-        }
-        setToast({
-          tone: 'success',
-          message: `Added to ${mode === 'demo' ? 'demo ' : ''}cart. Your next change will be saved as a new item.`,
-          showCart: true,
-        });
-      }
+      if (orderMode === 'team' && !state.editing) await submitTeam();
+      else await submitSingle();
     } catch (error) {
-      console.error('[embroidery] submit failed', error);
+      if (!(error instanceof UserFacingError)) console.error('[embroidery] submit failed', error);
       setToast({
         tone: 'error',
         message: error instanceof Error ? error.message : 'Something went wrong. Please try again.',
@@ -581,26 +1028,138 @@ export function Configurator(props: ConfiguratorProps) {
     }
   };
 
+  const onShare = async () => {
+    if (issues.length) {
+      setStepError(issues[0]!.message);
+      return;
+    }
+    setShare({ busy: true, url: null, message: null });
+    try {
+      const layers = await persistArtwork();
+      setBusy(null);
+      const config = buildConfiguration(stateRef.current, renderedMap, { layers });
+      const { configRef } = await persistence.saveConfiguration(config);
+      const url = shareUrl(configRef);
+      setSaved(
+        rememberDesign({
+          ref: configRef,
+          title: product.title,
+          summary: layers.map((l) => layerTitle(adapter, l)).join(' + '),
+          savedAt: new Date().toISOString(),
+        }),
+      );
+      let message = 'Saved. Copy the link below to share it.';
+      try {
+        await navigator.clipboard.writeText(url);
+        message = 'Saved — link copied to your clipboard.';
+      } catch {
+        /* clipboard blocked: the link is shown for manual copy */
+      }
+      if (persistence.mode === 'demo') message += ' (Demo: links open in this browser only.)';
+      setShare({ busy: false, url, message });
+    } catch (e) {
+      setBusy(null);
+      setShare({
+        busy: false,
+        url: null,
+        message: e instanceof Error ? e.message : 'Could not save this design.',
+      });
+    }
+  };
+
   /* ---------------- render ---------------- */
   const allowed = availablePlacements(adapter, settings.positionIds).map((p) => p.id);
-  const design = state.activeDesign === 'image' ? state.image : state.text;
+  const usedBy: Partial<Record<PlacementId, string>> = {};
+  for (const preset of adapter.placements)
+    state.layers.forEach((l, i) => {
+      if (
+        l.id === layer.id ||
+        usedBy[preset.id] ||
+        !positionsConflict(adapter, l.placement.positionId, preset.id)
+      )
+        return;
+      usedBy[preset.id] =
+        l.placement.positionId === preset.id
+          ? `Used by design ${i + 1}`
+          : `Overlaps design ${i + 1}`;
+    });
+  const canAddLayer =
+    state.layers.length < maxDesigns &&
+    freePositions(state, adapter, settings.positionIds).length > 0;
+  const layerBar =
+    maxDesigns > 1 ? (
+      <LayerBar
+        adapter={adapter}
+        layers={state.layers}
+        activeLayerId={layer.id}
+        canAdd={canAddLayer}
+        onSelect={(layerId) => dispatch({ type: 'selectLayer', layerId })}
+        onAdd={() => dispatch({ type: 'addLayer', allowed: settings.positionIds })}
+        onRemove={(layerId) => {
+          const removed = state.layers.find((l) => l.id === layerId);
+          releaseUrl(removed?.image?.previewUrl);
+          dispatch({ type: 'removeLayer', layerId });
+        }}
+      />
+    ) : null;
+  const reviewLayers: ReviewLayer[] = state.layers.map((l) => ({
+    layerId: l.id,
+    design: layerDesign(l),
+    resolved: layoutOf(l.id)?.resolved ?? null,
+    rotationDeg: l.placement.rotationDeg,
+  }));
+  const canTeam = settings.teamOrders && !state.editing;
+  const submitLabel = state.editing
+    ? 'Update Cart Item'
+    : orderMode === 'team'
+      ? `Add ${teamRows.length} to Cart`
+      : 'Add to Cart';
 
   return (
-    <div class="emb-root" data-mode={mode} data-testid="configurator">
+    <div
+      class="emb-root"
+      data-mode={mode}
+      data-theme={theme}
+      data-step={state.step}
+      data-testid="configurator"
+    >
       <header class="emb-header">
         <div>
-          <p class="emb-eyebrow">Embroidery studio</p>
+          <p class="emb-eyebrow">
+            <span class="emb-eyebrow__stitch" aria-hidden="true" />
+            Embroidery studio
+          </p>
           <h2 class="emb-title">{settings.heading}</h2>
           <p class="emb-subtitle">{settings.subtitle}</p>
         </div>
-        {mode === 'demo' ? (
-          <span
-            class="emb-badge"
-            title="Runs without Shopify. Cart and storage are local to this browser."
-          >
-            Demo mode
-          </span>
-        ) : null}
+        <div class="emb-header__aside">
+          {settings.themeSwitcher ? (
+            <div
+              class="emb-theme-switch"
+              role="radiogroup"
+              aria-label="Design style"
+              data-testid="theme-switch"
+            >
+              {(['clean', 'sport', 'atelier'] as const).map((t) => (
+                <button
+                  key={t}
+                  type="button"
+                  role="radio"
+                  aria-checked={theme === t}
+                  class={theme === t ? 'is-on' : ''}
+                  onClick={() => chooseTheme(t)}
+                >
+                  {t === 'clean' ? 'Clean' : t === 'sport' ? 'Sport' : 'Atelier'}
+                </button>
+              ))}
+            </div>
+          ) : null}
+          {mode === 'demo' ? (
+            <span class="emb-badge" title="Cart and saved designs stay in this browser.">
+              Demo workspace
+            </span>
+          ) : null}
+        </div>
       </header>
 
       {state.editing ? (
@@ -624,6 +1183,9 @@ export function Configurator(props: ConfiguratorProps) {
       ) : null}
 
       <nav class="emb-steps-nav" aria-label="Customization steps">
+        <span class="emb-steps__track" aria-hidden="true">
+          <span style={{ transform: `scaleX(${state.step / (STEPS.length - 1)})` }} />
+        </span>
         <ol class="emb-steps">
           {STEPS.map((label, i) => (
             <li key={label}>
@@ -641,7 +1203,6 @@ export function Configurator(props: ConfiguratorProps) {
           ))}
         </ol>
       </nav>
-
       <div class="emb-layout">
         <div class="emb-layout__viewer">
           <Viewer
@@ -649,17 +1210,23 @@ export function Configurator(props: ConfiguratorProps) {
             modelUrl={props.modelUrl}
             onViewer={onViewer}
             onDesignDrag={onDesignDrag}
-            designSurface={layout?.raster ? facingSurface : null}
+            designSurface={activeLayout?.raster ? facingSurface : null}
             dragHint={state.step === 2}
             modelLabel={product.title}
           />
+          <div class="emb-preview-summary">
+            <div>
+              <strong>{product.title}</strong>
+              <span>{Object.values(state.product.options).join(' / ')}</span>
+            </div>
+            <span class="emb-preview-summary__designs">
+              {state.layers.length} {state.layers.length === 1 ? 'design' : 'designs'}
+            </span>
+          </div>
         </div>
 
         <section class="emb-panel" aria-labelledby="emb-step-heading">
           <div class="emb-panel__head">
-            <p class="emb-panel__count">
-              Step {state.step + 1} of {STEPS.length}
-            </p>
             <h3 class="emb-panel__title" id="emb-step-heading" tabIndex={-1} ref={headingRef}>
               {STEP_TITLES[state.step]}
             </h3>
@@ -668,44 +1235,103 @@ export function Configurator(props: ConfiguratorProps) {
 
           <div class="emb-panel__body">
             {state.step === 0 ? (
-              <ProductStep
-                product={product}
-                selection={state.product}
-                colorOverrides={settings.garmentColors}
-                originalColorHex={garmentInfo?.originalColorHex ?? null}
-                onOption={(name, value) => dispatch({ type: 'selectOption', name, value, product })}
-              />
+              <>
+                <ProductStep
+                  product={product}
+                  selection={state.product}
+                  colorOverrides={settings.garmentColors}
+                  originalColorHex={garmentInfo?.originalColorHex ?? null}
+                  onOption={(name, value) =>
+                    dispatch({ type: 'selectOption', name, value, product })
+                  }
+                />
+                {settings.sharing && saved.length ? (
+                  <div class="emb-saved" data-testid="saved-designs">
+                    <p class="emb-field__label">Your saved designs</p>
+                    <ul>
+                      {saved.map((d) => (
+                        <li key={d.ref}>
+                          <span>
+                            <strong>{d.summary || d.title}</strong>
+                            <span class="emb-muted">
+                              {' '}
+                              · {new Date(d.savedAt).toLocaleDateString(product.locale)}
+                            </span>
+                          </span>
+                          <span class="emb-row">
+                            <button
+                              type="button"
+                              class="emb-link"
+                              onClick={() => void openSaved(d.ref)}
+                            >
+                              Open
+                            </button>
+                            <button
+                              type="button"
+                              class="emb-link"
+                              onClick={() =>
+                                void navigator.clipboard
+                                  ?.writeText(shareUrl(d.ref))
+                                  .then(() => setToast({ tone: 'info', message: 'Link copied.' }))
+                              }
+                            >
+                              Copy link
+                            </button>
+                            <button
+                              type="button"
+                              class="emb-link"
+                              onClick={() => setSaved(forgetDesign(d.ref))}
+                            >
+                              Remove
+                            </button>
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
+              </>
             ) : null}
             {state.step === 1 ? (
               <DesignStep
-                activeDesign={state.activeDesign}
-                text={state.text}
-                image={state.image}
+                key={layer.id}
+                header={layerBar}
+                activeDesign={layer.activeDesign}
+                text={layer.text}
+                image={layer.image}
                 fontIds={settings.fontIds}
                 threadColorIds={settings.threadColorIds}
                 maxUploadBytes={settings.maxUploadBytes}
-                lowContrast={state.activeDesign === 'text' && lowContrast}
-                fitted={!!layout?.resolved.fitted}
+                lowContrast={layer.activeDesign === 'text' && lowContrast}
+                fitted={!!activeLayout?.resolved?.fitted}
                 onDesignType={(designType) => dispatch({ type: 'setDesignType', designType })}
                 onText={(patch) => dispatch({ type: 'updateText', patch })}
                 onImageScale={(scale) => dispatch({ type: 'updateImage', patch: { scale } })}
                 onUpload={onUpload}
+                onBackground={onBackground}
+                onStitchStyle={(stitchStyle) =>
+                  layer.activeDesign === 'image'
+                    ? dispatch({ type: 'updateImage', patch: { stitchStyle } })
+                    : dispatch({ type: 'updateText', patch: { stitchStyle } })
+                }
+                priceHint={priceHint}
+                sizeHint={sizeHint}
                 onRemoveImage={() => {
-                  const url = state.image?.previewUrl;
-                  if (url && files.current.has(url)) {
-                    URL.revokeObjectURL(url);
-                    files.current.delete(url);
-                  }
+                  releaseUrl(layer.image?.previewUrl);
+                  originals.current.delete(layer.id);
                   dispatch({ type: 'removeImage' });
                 }}
               />
             ) : null}
             {state.step === 2 ? (
               <PlacementStep
+                header={layerBar}
                 adapter={adapter}
-                placement={state.placement}
+                placement={layer.placement}
                 allowed={allowed}
-                resolved={layout?.resolved ?? null}
+                usedBy={usedBy}
+                resolved={activeLayout?.resolved ?? null}
+                sizeHint={sizeHint}
                 onPosition={(positionId) => dispatch({ type: 'setPosition', positionId })}
                 onPatch={(patch) => dispatch({ type: 'updatePlacement', patch })}
               />
@@ -714,13 +1340,38 @@ export function Configurator(props: ConfiguratorProps) {
               <ReviewStep
                 product={product}
                 selection={state.product}
-                design={design}
-                resolved={layout?.resolved ?? null}
-                rotationDeg={state.placement.rotationDeg}
+                layers={reviewLayers}
                 thumbnail={thumbnail}
                 issues={issues}
+                breakdown={breakdown}
+                orderMode={canTeam ? orderMode : 'single'}
+                canTeam={canTeam}
+                share={share}
+                onShare={() => void onShare()}
+                onOrderMode={setOrderMode}
+                teamPanel={
+                  <TeamOrderPanel
+                    product={product}
+                    sizeOption={sizeOption}
+                    rows={teamRows}
+                    personalizedLabel={
+                      personalizedLayer ? layerTitle(adapter, personalizedLayer) : null
+                    }
+                    personalizeOptions={textLayers.map((l) => ({
+                      id: l.id,
+                      label: getPreset(adapter, l.placement.positionId)?.label ?? '',
+                    }))}
+                    personalizedId={personalizedLayer?.id ?? null}
+                    onPersonalize={setPersonalizedId}
+                    onChange={setTeamRows}
+                    rowError={teamRowError}
+                  />
+                }
                 onQuantity={(quantity) => dispatch({ type: 'setQuantity', quantity })}
-                onEdit={goTo}
+                onEdit={(step, layerId) => {
+                  if (layerId) dispatch({ type: 'selectLayer', layerId });
+                  goTo(step);
+                }}
               />
             ) : null}
           </div>
@@ -731,41 +1382,44 @@ export function Configurator(props: ConfiguratorProps) {
             </p>
           ) : null}
 
-          <div class="emb-actions">
-            <button
-              type="button"
-              class="emb-btn emb-btn--secondary"
-              onClick={() => goTo((state.step - 1) as StepIndex)}
-              disabled={state.step === 0}
-            >
-              Back
-            </button>
-            {state.step < 3 ? (
+          <div class="emb-dock">
+            <PriceBar breakdown={breakdown} currency={product.currency} locale={product.locale} />
+            <div class="emb-actions">
               <button
                 type="button"
-                class="emb-btn emb-btn--primary"
-                onClick={next}
-                data-testid="continue"
+                class="emb-btn emb-btn--secondary"
+                onClick={() => goTo((state.step - 1) as StepIndex)}
+                disabled={state.step === 0}
               >
-                Continue
+                Back
               </button>
-            ) : (
-              <button
-                type="button"
-                class="emb-btn emb-btn--primary"
-                onClick={() => void submit()}
-                disabled={!!busy}
-                aria-disabled={issues.length > 0}
-                data-testid="add-to-cart"
-              >
-                {busy ? (
-                  <span class="emb-spinner emb-spinner--sm" aria-hidden="true" />
-                ) : (
-                  <IconBag />
-                )}
-                <span>{busy ?? (state.editing ? 'Update Cart Item' : 'Add to Cart')}</span>
-              </button>
-            )}
+              {state.step < 3 ? (
+                <button
+                  type="button"
+                  class="emb-btn emb-btn--primary"
+                  onClick={next}
+                  data-testid="continue"
+                >
+                  Continue
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  class="emb-btn emb-btn--primary"
+                  onClick={() => void submit()}
+                  disabled={!!busy}
+                  aria-disabled={issues.length > 0}
+                  data-testid="add-to-cart"
+                >
+                  {busy ? (
+                    <span class="emb-spinner emb-spinner--sm" aria-hidden="true" />
+                  ) : (
+                    <IconBag />
+                  )}
+                  <span>{busy ?? submitLabel}</span>
+                </button>
+              )}
+            </div>
           </div>
           <div class="emb-actions__secondary">
             <button type="button" class="emb-link" onClick={reset} data-testid="reset">

@@ -4,7 +4,7 @@ import {
   type ProductContext,
   type ProductSelection,
 } from '@embroidery/shared';
-import { Choice, Notice } from './controls';
+import { Choice } from './controls';
 
 export const isColorOption = (name: string) => /colou?r|shade/i.test(name);
 
@@ -39,10 +39,9 @@ export function ProductStep(p: Props) {
         ) : null}
       </div>
       {p.product.isDemo ? (
-        <Notice tone="info" testId="demo-variants-notice">
-          <strong>Demo variants.</strong> Sizes and colours here are sample data. Once the app is
-          connected to Shopify, they come from your real product.
-        </Notice>
+        <p class="emb-field__hint" data-testid="demo-variants-notice">
+          Demo garment · sample sizes and colours
+        </p>
       ) : null}
 
       {p.product.options.map((option) => {

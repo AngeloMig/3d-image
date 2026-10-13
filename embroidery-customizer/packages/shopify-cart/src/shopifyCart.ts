@@ -1,4 +1,5 @@
-import { mergeLineItemProperties, readCustomization, type LineItemProperties } from './properties';
+import { expandWithFees, feeLinesFor, planFeeSync, type WireItem } from './fees';
+import { mergeLineItemProperties, readCustomization, readFee, type LineItemProperties } from './properties';
 import {
   CartError,
   type AddItemInput,
@@ -147,19 +148,31 @@ export class ShopifyCartAdapter implements CartAdapter {
     return this.toSnapshot(await this.request<AjaxCart>('cart.js'));
   }
 
-  async addItem(input: AddItemInput): Promise<CartLine> {
-    const item: Record<string, unknown> = {
-      id: Number(input.variantId),
-      quantity: input.quantity,
-      properties: input.properties,
+  private wire(item: WireItem): Record<string, unknown> {
+    const out: Record<string, unknown> = {
+      id: Number(item.variantId),
+      quantity: item.quantity,
+      properties: item.properties,
     };
-    if (input.sellingPlanId) item.selling_plan = Number(input.sellingPlanId);
-    const res = await this.request<{ items: AjaxLineItem[] }>('cart/add.js', { items: [item] });
-    const added = res.items?.[0];
-    if (!added) throw new CartError('The item could not be added to the cart.');
-    const cart = await this.getCart();
-    this.emit(cart);
-    return mapAjaxLine(added);
+    if (item.sellingPlanId) out.selling_plan = Number(item.sellingPlanId);
+    return out;
+  }
+
+  async addItem(input: AddItemInput): Promise<CartLine> {
+    const [line] = await this.addItems([input]);
+    return line!;
+  }
+
+  /** One `/{locale}/cart/add.js` request for every item + fee line (team orders, multi-fee items). */
+  async addItems(inputs: AddItemInput[]): Promise<CartLine[]> {
+    const items = expandWithFees(inputs).map((i) => this.wire(i));
+    const res = await this.request<{ items: AjaxLineItem[] }>('cart/add.js', { items });
+    const added = (res.items ?? []).map(mapAjaxLine);
+    const ids = new Set(inputs.map((i) => readCustomization(i.properties).customizationId));
+    const customized = added.filter((l) => ids.has(readCustomization(l.properties).customizationId) && !readFee(l.properties));
+    if (customized.length === 0) throw new CartError('The item could not be added to the cart.');
+    this.emit(await this.getCart());
+    return customized;
   }
 
   async updateCustomizedItem(input: UpdateItemInput): Promise<CartLine> {
@@ -167,52 +180,56 @@ export class ShopifyCartAdapter implements CartAdapter {
     const before = await this.getCart();
     const line = findTargetLine(before.lines, input.lineKey, input.customizationId);
     if (!line)
-      throw new CartError(
-        'This item is no longer in your cart. Refresh the page and try again.',
-        404,
-      );
+      throw new CartError('This item is no longer in your cart. Refresh the page and try again.', 404);
     const properties = mergeLineItemProperties(line.properties, input.properties);
 
-    let after: CartSnapshot;
     if (line.variantId === String(input.variantId)) {
-      after = this.toSnapshot(
-        await this.request<AjaxCart>('cart/change.js', {
-          id: line.key,
-          quantity: input.quantity,
-          properties,
-        }),
-      );
+      await this.request<AjaxCart>('cart/change.js', { id: line.key, quantity: input.quantity, properties });
     } else {
       // change.js cannot swap variants: remove the line, then add the new variant with the same data.
       await this.request<AjaxCart>('cart/change.js', { id: line.key, quantity: 0 });
-      const item: Record<string, unknown> = {
-        id: Number(input.variantId),
-        quantity: input.quantity,
-        properties,
-      };
-      if (line.sellingPlanId) item.selling_plan = Number(line.sellingPlanId);
-      await this.request('cart/add.js', { items: [item] });
-      after = await this.getCart();
+      await this.request('cart/add.js', {
+        items: [this.wire({ variantId: input.variantId, quantity: input.quantity, properties, sellingPlanId: line.sellingPlanId })],
+      });
     }
+
+    // Replace this item's fee lines (design types/count may have changed).
+    const oldFees = feeLinesFor(before.lines, input.customizationId);
+    if (oldFees.length)
+      await this.request('cart/update.js', { updates: Object.fromEntries(oldFees.map((f) => [f.key, 0])) });
+    const feeItems = expandWithFees([{ ...input, properties }]).slice(1);
+    if (feeItems.length) await this.request('cart/add.js', { items: feeItems.map((i) => this.wire(i)) });
+
+    const after = await this.getCart();
     this.emit(after);
     const updated = after.lines.find(
-      (l) =>
-        readCustomization(l.properties).customizationId ===
-        readCustomization(properties).customizationId,
+      (l) => !readFee(l.properties) && readCustomization(l.properties).customizationId === input.customizationId,
     );
-    if (!updated)
-      throw new CartError(
-        'The cart was updated but the item could not be found. Refresh the page.',
-      );
+    if (!updated) throw new CartError('The cart was updated but the item could not be found. Refresh the page.');
     return updated;
   }
 
   async removeLine(key: string): Promise<CartSnapshot> {
+    const before = await this.getCart();
+    const line = before.lines.find((l) => l.key === key);
+    const id = line ? readCustomization(line.properties).customizationId : null;
+    const keys = [key, ...(id ? feeLinesFor(before.lines, id).map((f) => f.key) : [])];
     const cart = this.toSnapshot(
-      await this.request<AjaxCart>('cart/change.js', { id: key, quantity: 0 }),
+      await this.request<AjaxCart>('cart/update.js', { updates: Object.fromEntries(keys.map((k) => [k, 0])) }),
     );
     this.emit(cart);
     return cart;
+  }
+
+  async syncFees(): Promise<CartSnapshot | null> {
+    const cart = await this.getCart();
+    const { updates, additions } = planFeeSync(cart.lines);
+    if (Object.keys(updates).length === 0 && additions.length === 0) return null;
+    if (Object.keys(updates).length) await this.request<AjaxCart>('cart/update.js', { updates });
+    if (additions.length) await this.request('cart/add.js', { items: additions.map((i) => this.wire(i)) });
+    const after = await this.getCart();
+    this.emit(after);
+    return after;
   }
 
   subscribe(listener: CartListener): () => void {

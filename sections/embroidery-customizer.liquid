@@ -69,7 +69,13 @@
       { "value": "button", "label": "Button that opens a full-screen customizer" }
     ] },
     { "type": "text", "id": "button_label", "label": "Button label", "default": "Personalize with embroidery" },
-    { "type": "text", "id": "heading", "label": "Heading", "default": "Customize Your Embroidery" },
+    { "type": "select", "id": "design_theme", "label": "Design style", "default": "clean", "options": [
+      { "value": "clean", "label": "Clean — subtle, uses your theme font" },
+      { "value": "sport", "label": "Sport — bold, athletic, black & white" },
+      { "value": "atelier", "label": "Atelier — warm, premium, serif" }
+    ] },
+    { "type": "checkbox", "id": "show_style_switcher", "label": "Let visitors switch design style (client preview)", "default": false, "info": "Shows a Clean / Sport / Atelier switch on the customizer. Turn off before launch." },
+    { "type": "text", "id": "heading", "label": "Heading", "default": "Make it yours." },
     { "type": "text", "id": "subtitle", "label": "Subtitle", "default": "Add a name, initials or your logo — see it stitched onto the garment in 3D before you order." },
     { "type": "text", "id": "default_text", "label": "Default embroidery text", "default": "YOUR NAME" },
     { "type": "header", "content": "Embroidery positions" },
@@ -86,7 +92,7 @@
       { "value": "center_back", "label": "Center back" }
     ] },
     { "type": "header", "content": "Thread and garment colours" },
-    { "type": "text", "id": "thread_colors", "label": "Thread colours offered", "default": "white,black,navy,red,gold,silver,forest,royal,burgundy,blush", "info": "Comma-separated ids. The first one is the default." },
+    { "type": "text", "id": "thread_colors", "label": "Thread colours offered", "info": "Leave empty to offer all 20 colours, or list ids (first = default): white, black, cream, silver, charcoal, navy, royal, sky, teal, forest, kelly, olive, gold, yellow, orange, red, burgundy, blush, fuchsia, purple." },
     { "type": "textarea", "id": "garment_colors", "label": "Garment colour map", "default": "Royal: original\nWhite: #f1f1ee\nBlack: #232325\nNavy: #24304f\nBeige: #d9c8a9", "info": "One per line: <colour option value>: <hex>, or 'original' to keep the model's texture." },
     { "type": "header", "content": "3D model" },
     { "type": "checkbox", "id": "use_product_model", "label": "Use the product's 3D model media (GLB) when available", "default": true },
@@ -94,6 +100,12 @@
     { "type": "select", "id": "model_profile", "label": "Model calibration profile", "default": "tshirt-v1", "options": [
       { "value": "tshirt-v1", "label": "Classic T-shirt (sample model)" }
     ] },
+    { "type": "header", "content": "Pricing & extra features" },
+    { "type": "product", "id": "fee_product", "label": "Embroidery fee product", "info": "Optional. A product with variants named after each fee: \"Text\", \"Logo\", \"Medium size\", \"Large size\", \"3D Puff\", \"Metallic thread\", \"Woven patch\", \"Chenille\", \"Premium font\". Their Shopify prices are shown live and added to the cart." },
+    { "type": "textarea", "id": "sample_prices", "label": "Sample add-on prices (preview only)", "default": "Text: 5\nLogo: 8\nMedium size: 3\nLarge size: 6\n3D Puff: 4\nMetallic thread: 3\nWoven patch: 6\nChenille: 7\nPremium font: 2", "info": "Shown only while no Embroidery fee product is selected, labelled 'not charged yet'. Amounts in your store currency. Clear it to hide prices." },
+    { "type": "range", "id": "max_designs", "label": "Designs per item", "min": 1, "max": 4, "step": 1, "default": 4, "info": "e.g. names and logos on both chests and the back. Overlapping spots can't be combined." },
+    { "type": "checkbox", "id": "enable_team_orders", "label": "Allow team / bulk orders (a different name per shirt)", "default": true },
+    { "type": "checkbox", "id": "enable_sharing", "label": "Allow saving and sharing designs by link", "default": true },
     { "type": "header", "content": "Behaviour" },
     { "type": "range", "id": "max_upload_mb", "label": "Max logo upload size", "min": 1, "max": 10, "step": 1, "unit": "MB", "default": 5 },
     { "type": "select", "id": "after_add", "label": "After adding to cart", "default": "stay", "options": [

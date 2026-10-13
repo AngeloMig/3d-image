@@ -67,9 +67,7 @@ test('every enabled position moves the design to a distinct place, back included
   expect(centers.center_back![2]).toBeLessThan(0);
   expect(centers.upper_back![1]).toBeGreaterThan(centers.center_back![1]!);
   await expect.poll(async () => (await viewerState(page, HOST)).facing).toBe('back');
-  await expect(
-    page.getByTestId('position-choice').locator('[data-value="left_sleeve"]'),
-  ).toHaveAttribute('aria-disabled', 'true');
+  await expect(page.getByTestId('unavailable-positions')).toContainText('Left Sleeve');
 });
 
 test('image upload: valid artwork lands on the shirt, invalid files are rejected', async ({

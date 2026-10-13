@@ -2,7 +2,18 @@
 
 A Preact + TypeScript + Three.js configurator that lets customers add **text or a logo**, see it
 **embroidered onto a rotatable 3D T-shirt** (front and back), add it to the **real Shopify cart**, and
-**edit it again from the cart**. Designs and artwork are stored server-side by a Shopify app
+**edit it again from the cart**.
+
+**Features**
+
+- Up to **4 designs per shirt** (left/right chest, upper/center back — overlapping spots are blocked).
+- **10 fonts** (3 premium scripts) and **20 thread colours**.
+- **5 embroidery styles** rendered in 3D: Flat, 3D Puff, Metallic thread, Woven patch, Chenille.
+- **Logo uploads** with one-click **background removal** (keeps white areas inside the logo).
+- **Live price on every step** — updates instantly for size tier, premium font, style and every added logo.
+- **Team / bulk orders**: one design, a different name + size per person, added in one cart request.
+- **Save & share** links that reopen a design; "Your saved designs" list.
+- Edit any customized line from the cart; fees stay in sync with quantity changes. Designs and artwork are stored server-side by a Shopify app
 (React Router template) and appear on **packing slips** for fulfilment.
 
 ```
@@ -37,7 +48,7 @@ npm run demo          # http://localhost:5173  — standalone demo with a local 
 ```bash
 npm run typecheck     # storefront packages + Shopify app
 npm run lint
-npm test              # Vitest (59 tests)
+npm test              # Vitest unit tests
 npm run test:e2e      # Playwright (desktop + mobile; downloads Chromium on first run: npx playwright install chromium)
 npm run demo:build    # static demo build → apps/demo/dist
 npm run extension:build   # storefront bundle → extensions/embroidery-customizer/assets
@@ -109,6 +120,27 @@ redirect URL and **app proxy** (`/apps/embroidery`) automatically during develop
 
 The same block can be placed on the **homepage** or any page — pick the product in the block settings.
 
+### Pricing: the “Embroidery fee” product
+
+Prices are never set by the browser. Create one product in Shopify (e.g. **Embroidery fee**, not
+shown in collections, no shipping) with a variant per fee you charge — the variant **title** decides
+what it's for, the variant **price** is the fee:
+
+| Variant title | Charged when (per item) | Demo price |
+|---|---|---|
+| `Text` | each text design | $5 |
+| `Logo` | each uploaded logo / image | $8 |
+| `Medium size` | a design 10–20 cm on its longest side | $3 |
+| `Large size` | a design 20 cm or more | $6 |
+| `3D Puff` / `Metallic thread` / `Woven patch` / `Chenille` | that embroidery style | $4 / $3 / $6 / $7 |
+| `Premium font` | a premium script font | $2 |
+
+Skip any variant you don't charge for. Then choose the product in the block's **Embroidery fee
+product** setting (and in the *Embroidery: edit in cart* embed). The live price on every step uses
+those Shopify prices, and the fees are added as separate cart lines tied to the shirt (hidden
+`_Embroidery Fee For` property). Removing a shirt or changing its quantity in the cart keeps the
+fee lines in sync. Size tiers are defined in `packages/shared/src/pricing.ts` (`SIZE_TIERS`).
+
 ### C. Packing slips
 
 *Settings → Shipping and delivery → Packing slips → Edit template*: paste
@@ -178,7 +210,10 @@ bucket, and (for public apps) Shopify’s *protected customer data* approval for
 - [ ] Two different designs → two cart lines; same design twice → quantity 2.
 - [ ] Cart page and drawer show “Edit embroidery”; editing changes only that line and keeps other properties.
 - [ ] Place a test order → admin app lists it with the order number; artwork downloads.
-- [ ] Packing slip preview shows the Embroidery block.
+- [ ] Packing slip preview shows the Embroidery block (incl. Design 2+, style and team order).
+- [ ] With the fee product set: price bar changes for size tier, premium font, style and extra logo;
+      cart shows matching fee lines; changing shirt quantity updates fee quantities.
+- [ ] Team order with 3 names → 3 cart lines (+ fees); share link reopens the design on another device.
 - [ ] Mobile: no horizontal scroll; sticky Continue/Add button reachable.
 
 ## Known limitations
@@ -191,7 +226,11 @@ bucket, and (for public apps) Shopify’s *protected customer data* approval for
 - Cart drawers vary by theme: the edit hook finds lines by their visible “Customization ID”. Themes that
   hide properties need `<span data-embroidery-edit-slot="{{ item.key }}"></span>` in the line markup.
   After saving, the page reloads to refresh theme-rendered cart markup.
-- Embroidery pricing (surcharges) isn’t applied by the browser; use variant pricing or a separate add-on
-  product/Shopify Functions if needed.
+- Fees are separate cart lines of the fee product (works on every plan). If a customer removes only a
+  fee line, the cart hook re-adds nothing — merchants can hide the fee product from the cart edit or
+  use Shopify Functions (Cart Transform) on Plus for bundled pricing.
+- A 5th design position needs the sleeves calibrated for this model (data model already supports it).
+- Team orders personalize one text design per person (choose which one); numbers per player would be
+  a small extension of the same rows.
 - Rate limiting is in-memory (per instance); use a shared store when scaling horizontally.
 - Theme app extensions don’t run in checkout; customization happens before checkout only.

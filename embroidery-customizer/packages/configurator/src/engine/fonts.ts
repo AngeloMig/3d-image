@@ -69,3 +69,33 @@ export function canvasFont(font: FontOption, px: number): string {
   const family = fontStatus(font.id) === 'loaded' ? cssFontFamily(font) : font.fallback;
   return `${font.weight} ${px.toFixed(2)}px ${family}`;
 }
+
+/** Display faces for the customizer's own headings (merchants can override --emb-font-display). */
+export const UI_DISPLAY_FAMILY = 'EmbroideryUIDisplay';
+export const UI_SPORT_FAMILY = 'EmbroideryUISport';
+const uiFonts = new Map<string, Promise<void>>();
+export function ensureUiFont(theme: 'clean' | 'atelier' | 'sport' = 'clean'): Promise<void> {
+  if (theme === 'clean') return Promise.resolve(); // uses the shop's own font
+  const [family, file, weight] =
+    theme === 'sport'
+      ? [UI_SPORT_FAMILY, 'bebas-neue-latin-400-normal.woff2', '400']
+      : [UI_DISPLAY_FAMILY, 'ui-fraunces-latin-600-normal.woff2', '600'];
+  let job = uiFonts.get(family);
+  if (!job) {
+    job = (async () => {
+      const url = fontFileUrl(file);
+      if (!url || typeof FontFace === 'undefined' || typeof document === 'undefined') return;
+      try {
+        const face = new FontFace(family, `url(${JSON.stringify(url)}) format("woff2")`, {
+          weight,
+          display: 'swap',
+        });
+        document.fonts.add(await face.load());
+      } catch {
+        /* falls back to the system stack */
+      }
+    })();
+    uiFonts.set(family, job);
+  }
+  return job;
+}

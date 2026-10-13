@@ -31,6 +31,8 @@ export interface PlacementPreset {
   defaultTextSizeCm: number;
   defaultImageWidthCm: number;
   maxOffsetCm: { x: number; y: number };
+  /** Positions that physically overlap this one and can't be combined on one garment. */
+  conflictsWith?: PlacementId[];
 }
 
 export interface ModelAdapter {
@@ -112,6 +114,7 @@ export const TSHIRT_V1: ModelAdapter = {
       // Wearer's left = +X = viewer's right when facing the shirt.
       id: 'left_chest',
       label: 'Left Chest',
+      conflictsWith: ['center_chest'],
       surfaceId: 'front',
       available: true,
       anchor: { x: 0.6131, y: 0.714 },
@@ -124,6 +127,7 @@ export const TSHIRT_V1: ModelAdapter = {
     {
       id: 'center_chest',
       label: 'Center Chest',
+      conflictsWith: ['left_chest', 'right_chest'],
       surfaceId: 'front',
       available: true,
       anchor: { x: 0.4987, y: 0.6343 },
@@ -136,6 +140,7 @@ export const TSHIRT_V1: ModelAdapter = {
     {
       id: 'right_chest',
       label: 'Right Chest',
+      conflictsWith: ['center_chest'],
       surfaceId: 'front',
       available: true,
       anchor: { x: 0.3844, y: 0.714 },
@@ -226,4 +231,10 @@ export function availablePlacements(
       getSurface(adapter, p.surfaceId)?.available &&
       (!allowed || allowed.includes(p.id)),
   );
+}
+
+/** True if two positions can't both carry a design (same spot or overlapping areas). */
+export function positionsConflict(adapter: ModelAdapter, a: PlacementId, b: PlacementId): boolean {
+  if (a === b) return true;
+  return !!getPreset(adapter, a)?.conflictsWith?.includes(b) || !!getPreset(adapter, b)?.conflictsWith?.includes(a);
 }

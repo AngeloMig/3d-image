@@ -4,6 +4,7 @@
   @param {object} [p] - Product to customize (blank = demo mode)
   @param {object} s - block.settings or section.settings
 {%- enddoc -%}
+
 {%- liquid
   assign model_url = s.model_url | strip
   if s.use_product_model and p != blank
@@ -55,7 +56,18 @@
     "display": {{ s.display | default: 'inline' | json }},
     "buttonLabel": {{ s.button_label | json }},
     "syncThemeVariant": {{ s.sync_theme_variant | json }},
+    "samplePrices": {{ s.sample_prices | json }},
+    "feeVariants": [
+      {%- if s.fee_product != blank -%}
+        {%- for v in s.fee_product.variants -%}
+          {"title": {{ v.title | json }}, "price": {{ v.price | json }}, "id": {{ v.id | json }}, "available": {{ v.available | json }}}
+          {%- unless forloop.last -%},{%- endunless -%}
+        {%- endfor -%}
+      {%- endif -%}
+    ],
     "settings": {
+      "theme": {{ s.design_theme | default: 'clean' | json }},
+      "themeSwitcher": {{ s.show_style_switcher | default: false | json }},
       "heading": {{ s.heading | json }},
       "subtitle": {{ s.subtitle | json }},
       "defaultText": {{ s.default_text | json }},
@@ -64,7 +76,10 @@
       "threadColorIds": {{ threads | json }},
       "maxUploadMb": {{ s.max_upload_mb | default: 5 | json }},
       "garmentColors": {{ s.garment_colors | json }},
-      "afterAdd": {{ s.after_add | default: 'stay' | json }}
+      "afterAdd": {{ s.after_add | default: 'stay' | json }},
+      "maxDesigns": {{ s.max_designs | default: 4 | json }},
+      "teamOrders": {{ s.enable_team_orders | json }},
+      "sharing": {{ s.enable_sharing | json }}
     }
   }
 </script>

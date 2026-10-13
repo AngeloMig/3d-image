@@ -35,6 +35,8 @@ export type ViewName = 'home' | 'front' | 'back';
 export type Facing = 'front' | 'back' | 'side';
 
 export interface DecalInput {
+  /** Design layer id — one decal per layer. */
+  id: string;
   canvas: HTMLCanvasElement;
   /** Bumped whenever the canvas pixels change. */
   version: number;
@@ -50,7 +52,7 @@ export interface ViewerCallbacks {
   onProgress?(ratio: number): void;
   onFacingChange?(facing: Facing): void;
   /** Cumulative drag delta in cm (screen-right / up positive) since the drag started. */
-  onDesignDrag?(dxCm: number, dyCm: number, phase: 'start' | 'move' | 'end'): void;
+  onDesignDrag?(dxCm: number, dyCm: number, phase: 'start' | 'move' | 'end', layerId: string): void;
   onContextLost?(): void;
 }
 
@@ -61,6 +63,15 @@ export interface GarmentInfo {
 }
 
 const TINT_UNIFORMS = Symbol('tint');
+
+interface DecalSlot {
+  input: DecalInput;
+  mesh: Mesh | null;
+  material: MeshStandardMaterial;
+  texture: CanvasTexture;
+  key: string;
+  version: number;
+}
 
 interface TintUniforms {
   uEmbTint: { value: Color };
@@ -170,18 +181,15 @@ export class GarmentViewer {
   private homeDistance = 2;
   private normalMap: Texture | null = null;
 
-  private decalMesh: Mesh | null = null;
-  private decalMaterial: MeshStandardMaterial | null = null;
-  private decalTexture: CanvasTexture | null = null;
-  private decalKey = '';
-  private decalVersion = -1;
-  private decalSurface: SurfaceConfig | null = null;
+  /** One decal per design layer. */
+  private decals = new Map<string, DecalSlot>();
+  private decalNormalMap: Texture | null = null;
 
   private frame = 0;
   private tween: { from: Spherical; to: Spherical; start: number; duration: number } | null = null;
   private facing: Facing = 'front';
   private dragEnabled = false;
-  private drag: { pointerId: number; start: Vector3 } | null = null;
+  private drag: { pointerId: number; start: Vector3; id: string } | null = null;
   private disposed = false;
 
   constructor(
@@ -320,7 +328,8 @@ export class GarmentViewer {
     this.scene.add(model);
     this.resize();
     this.setView('home', false);
-    if (this.decalSurface) this.decalKey = ''; // rebuild any decal requested before load
+    this.decals.forEach((slot) => (slot.key = '')); // rebuild decals requested before load
+    this.setDecals([...this.decals.values()].map((d) => d.input));
     this.requestRender();
     return { originalColorHex, sizeWarning };
   }
@@ -333,13 +342,18 @@ export class GarmentViewer {
   debugState() {
     const offset = this.camera.position.clone().sub(this.controls.target);
     const s = new Spherical().setFromVector3(offset);
-    const decalGeometry = this.decalMesh?.geometry;
-    let decalCenter: number[] | null = null;
-    if (decalGeometry && this.decalMesh?.visible) {
-      decalGeometry.computeBoundingBox();
-      const c = decalGeometry.boundingBox!.getCenter(new Vector3());
-      decalCenter = [c.x, c.y, c.z].map((n) => Math.round(n * 1000) / 1000);
-    }
+    const decals = [...this.decals.values()]
+      .filter((d) => d.mesh?.visible)
+      .map((d) => {
+        const g = d.mesh!.geometry;
+        g.computeBoundingBox();
+        const c = g.boundingBox!.getCenter(new Vector3());
+        return {
+          id: d.input.id,
+          center: [c.x, c.y, c.z].map((n) => Math.round(n * 1000) / 1000),
+          triangles: g.getAttribute('position').count / 3,
+        };
+      });
     return {
       loaded: this.isLoaded,
       theta: s.theta,
@@ -348,9 +362,11 @@ export class GarmentViewer {
       homeDistance: this.homeDistance,
       facing: this.facing,
       bounds: this.bounds.isEmpty() ? null : [this.bounds.min.toArray(), this.bounds.max.toArray()],
-      decalVisible: !!this.decalMesh?.visible,
-      decalTriangles: decalGeometry ? decalGeometry.getAttribute('position').count / 3 : 0,
-      decalCenter,
+      decals,
+      // First design — kept for simple single-design checks.
+      decalVisible: decals.length > 0,
+      decalTriangles: decals[0]?.triangles ?? 0,
+      decalCenter: decals[0]?.center ?? null,
       tint: this.tints.map((t) => ({
         mix: t.uEmbTintMix.value,
         color: t.uEmbTint.value.getHexString(SRGBColorSpace),
@@ -373,66 +389,66 @@ export class GarmentViewer {
 
   /* ----------------------------------------------------------------- decal */
 
-  setDecal(input: DecalInput | null): void {
-    if (!input) {
-      if (this.decalMesh) this.decalMesh.visible = false;
-      this.decalSurface = null;
-      this.decalKey = '';
-      this.requestRender();
-      return;
-    }
-    this.decalSurface = input.surface;
-    this.ensureDecalMaterial(input.canvas);
-
-    if (input.version !== this.decalVersion && this.decalTexture) {
-      if (this.decalTexture.image !== input.canvas) this.decalTexture.image = input.canvas;
-      const img = this.decalTexture.image as HTMLCanvasElement;
-      const sizeChanged =
-        (this.decalTexture.userData.w as number | undefined) !== img.width ||
-        (this.decalTexture.userData.h as number | undefined) !== img.height;
-      if (sizeChanged) {
-        // Immutable GPU storage: reallocate when the canvas dimensions change.
-        this.decalTexture.dispose();
-        this.decalTexture.userData.w = img.width;
-        this.decalTexture.userData.h = img.height;
+  /** Show exactly these decals (one per design layer); others are removed. */
+  setDecals(inputs: DecalInput[]): void {
+    const wanted = new Set(inputs.map((i) => i.id));
+    for (const [id, slot] of this.decals) if (!wanted.has(id)) this.disposeSlot(id, slot);
+    inputs.forEach((input, order) => {
+      let slot = this.decals.get(input.id);
+      if (!slot) {
+        slot = this.createSlot(input);
+        this.decals.set(input.id, slot);
       }
-      this.decalTexture.needsUpdate = true;
-      this.decalVersion = input.version;
-    }
-
-    const key = [
-      input.surface.id,
-      input.center.x.toFixed(5),
-      input.center.y.toFixed(5),
-      input.widthCm.toFixed(3),
-      input.heightCm.toFixed(3),
-      input.rotationDeg,
-    ].join('|');
-    if (this.model && key !== this.decalKey) {
-      this.rebuildDecal(input);
-      this.decalKey = key;
-    }
+      slot.input = input;
+      if (input.version !== slot.version) {
+        if (slot.texture.image !== input.canvas) slot.texture.image = input.canvas;
+        const img = slot.texture.image as HTMLCanvasElement;
+        if (slot.texture.userData.w !== img.width || slot.texture.userData.h !== img.height) {
+          // Immutable GPU storage: reallocate when the canvas dimensions change.
+          slot.texture.dispose();
+          slot.texture.userData.w = img.width;
+          slot.texture.userData.h = img.height;
+        }
+        slot.texture.needsUpdate = true;
+        slot.version = input.version;
+      }
+      const key = [
+        input.surface.id,
+        input.center.x.toFixed(5),
+        input.center.y.toFixed(5),
+        input.widthCm.toFixed(3),
+        input.heightCm.toFixed(3),
+        input.rotationDeg,
+      ].join('|');
+      if (this.model && key !== slot.key) {
+        this.rebuildDecal(slot);
+        slot.key = key;
+      }
+      if (slot.mesh) slot.mesh.renderOrder = 2 + order;
+    });
     this.requestRender();
   }
 
-  private ensureDecalMaterial(canvas: HTMLCanvasElement): void {
-    if (this.decalMaterial) return;
-    const texture = new CanvasTexture(canvas);
+  /** Single-design convenience wrapper. */
+  setDecal(input: DecalInput | null): void {
+    this.setDecals(input ? [input] : []);
+  }
+
+  private createSlot(input: DecalInput): DecalSlot {
+    const texture = new CanvasTexture(input.canvas);
     texture.colorSpace = SRGBColorSpace;
     texture.premultiplyAlpha = true;
     texture.anisotropy = Math.min(8, this.renderer.capabilities.getMaxAnisotropy());
-    texture.userData.w = canvas.width;
-    texture.userData.h = canvas.height;
-    this.decalTexture = texture;
+    texture.userData.w = input.canvas.width;
+    texture.userData.h = input.canvas.height;
 
-    let normalMap: Texture | null = null;
-    if (this.normalMap) {
-      normalMap = this.normalMap.clone();
-      normalMap.channel = 1; // sample with the garment's own UVs (decal attribute `uv1`)
-      normalMap.colorSpace = LinearSRGBColorSpace;
-      normalMap.needsUpdate = true;
+    if (this.normalMap && !this.decalNormalMap) {
+      this.decalNormalMap = this.normalMap.clone();
+      this.decalNormalMap.channel = 1; // sample with the garment's own UVs (decal attribute `uv1`)
+      this.decalNormalMap.colorSpace = LinearSRGBColorSpace;
+      this.decalNormalMap.needsUpdate = true;
     }
-    this.decalMaterial = new MeshStandardMaterial({
+    const material = new MeshStandardMaterial({
       map: texture,
       transparent: true,
       premultipliedAlpha: true,
@@ -443,9 +459,20 @@ export class GarmentViewer {
       roughness: 0.52,
       metalness: 0,
       side: DoubleSide,
-      normalMap,
+      normalMap: this.decalNormalMap,
     });
-    if (normalMap) this.decalMaterial.normalScale.set(0.6, 0.6);
+    if (this.decalNormalMap) material.normalScale.set(0.6, 0.6);
+    return { input, mesh: null, material, texture, key: '', version: -1 };
+  }
+
+  private disposeSlot(id: string, slot: DecalSlot): void {
+    if (slot.mesh) {
+      this.scene.remove(slot.mesh);
+      slot.mesh.geometry.dispose();
+    }
+    slot.material.dispose();
+    slot.texture.dispose();
+    this.decals.delete(id);
   }
 
   private normalizedToWorld(p: NormalizedPoint): Vector2 {
@@ -480,9 +507,10 @@ export class GarmentViewer {
     return null;
   }
 
-  private rebuildDecal(input: DecalInput): void {
+  private rebuildDecal(slot: DecalSlot): void {
+    const input = slot.input;
     const point = this.surfacePoint(input.surface, input.center);
-    if (!point || !this.decalMaterial) return;
+    if (!point) return;
     const rotation = (-input.rotationDeg * Math.PI) / 180;
     const quaternion = new Quaternion().setFromEuler(
       input.surface.facing === '-z' ? new Euler(0, Math.PI, rotation) : new Euler(0, 0, rotation),
@@ -495,24 +523,20 @@ export class GarmentViewer {
     // Only the garment mesh(es); decal geometry is produced in world space.
     let geometry = null;
     for (const mesh of this.meshes) {
-      geometry = buildDecalGeometry(
-        mesh,
-        { position: point, quaternion, size },
-        this.worldPerCm * 0.04,
-      );
+      geometry = buildDecalGeometry(mesh, { position: point, quaternion, size }, this.worldPerCm * 0.04);
       if (geometry) break;
     }
     if (!geometry) return;
-    if (!this.decalMesh) {
-      this.decalMesh = new Mesh(geometry, this.decalMaterial);
-      this.decalMesh.name = 'embroidery_decal';
-      this.decalMesh.renderOrder = 2;
-      this.scene.add(this.decalMesh);
+    if (!slot.mesh) {
+      slot.mesh = new Mesh(geometry, slot.material);
+      slot.mesh.name = `embroidery_decal_${input.id}`;
+      slot.mesh.userData.layerId = input.id;
+      this.scene.add(slot.mesh);
     } else {
-      this.decalMesh.geometry.dispose();
-      this.decalMesh.geometry = geometry;
+      slot.mesh.geometry.dispose();
+      slot.mesh.geometry = geometry;
     }
-    this.decalMesh.visible = true;
+    slot.mesh.visible = true;
   }
 
   /* ---------------------------------------------------------------- camera */
@@ -689,12 +713,15 @@ export class GarmentViewer {
     this.raycaster.setFromCamera(ndc, this.camera);
   }
 
-  private hitsDecal(e: PointerEvent): boolean {
-    if (!this.decalMesh?.visible || !this.decalSurface) return false;
+  /** The design layer under the pointer (front-most surface wins), if any. */
+  private decalUnderPointer(e: PointerEvent): string | null {
+    const meshes = [...this.decals.values()].map((d) => d.mesh).filter((m): m is Mesh => !!m?.visible);
+    if (!meshes.length) return null;
     this.pointerRay(e);
     const garment = this.raycaster.intersectObjects(this.meshes, false)[0];
-    const decal = this.raycaster.intersectObject(this.decalMesh, false)[0];
-    return !!decal && (!garment || decal.distance <= garment.distance + this.worldPerCm * 0.5);
+    const decal = this.raycaster.intersectObjects(meshes, false)[0];
+    if (!decal || (garment && decal.distance > garment.distance + this.worldPerCm * 0.5)) return null;
+    return (decal.object.userData.layerId as string | undefined) ?? null;
   }
 
   private garmentPoint(e: PointerEvent): Vector3 | null {
@@ -703,35 +730,39 @@ export class GarmentViewer {
   }
 
   private onPointerDown(e: PointerEvent): void {
-    if (!this.dragEnabled || e.button !== 0 || !this.hitsDecal(e)) return;
+    if (!this.dragEnabled || e.button !== 0) return;
+    const id = this.decalUnderPointer(e);
+    if (!id) return;
     const start = this.garmentPoint(e);
     if (!start) return;
     this.controls.enabled = false; // checked by OrbitControls in its own pointerdown handler
-    this.drag = { pointerId: e.pointerId, start };
+    this.drag = { pointerId: e.pointerId, start, id };
     this.renderer.domElement.setPointerCapture(e.pointerId);
     this.renderer.domElement.style.cursor = 'grabbing';
-    this.callbacks.onDesignDrag?.(0, 0, 'start');
+    this.callbacks.onDesignDrag?.(0, 0, 'start', id);
   }
 
   private onPointerMove(e: PointerEvent): void {
     if (this.drag && e.pointerId === this.drag.pointerId) {
       const p = this.garmentPoint(e);
       if (!p) return;
-      const mirror = this.decalSurface?.facing === '-z' ? -1 : 1;
+      const mirror = this.decals.get(this.drag.id)?.input.surface.facing === '-z' ? -1 : 1;
       this.callbacks.onDesignDrag?.(
         ((p.x - this.drag.start.x) / this.worldPerCm) * mirror,
         (p.y - this.drag.start.y) / this.worldPerCm,
         'move',
+        this.drag.id,
       );
       return;
     }
     if (this.dragEnabled && e.pointerType === 'mouse' && e.buttons === 0) {
-      this.renderer.domElement.style.cursor = this.hitsDecal(e) ? 'grab' : '';
+      this.renderer.domElement.style.cursor = this.decalUnderPointer(e) ? 'grab' : '';
     }
   }
 
   private onPointerUp(e: PointerEvent): void {
     if (!this.drag || e.pointerId !== this.drag.pointerId) return;
+    const id = this.drag.id;
     this.drag = null;
     this.controls.enabled = true;
     this.renderer.domElement.style.cursor = this.dragEnabled ? 'grab' : '';
@@ -740,7 +771,7 @@ export class GarmentViewer {
     } catch {
       /* already released */
     }
-    this.callbacks.onDesignDrag?.(0, 0, 'end');
+    this.callbacks.onDesignDrag?.(0, 0, 'end', id);
   }
 
   /* --------------------------------------------------------------- cleanup */
@@ -765,10 +796,8 @@ export class GarmentViewer {
     this.disposers.forEach((d) => d());
     this.controls.dispose();
     if (this.model) this.model.traverse((o) => this.disposeObject(o));
-    if (this.decalMesh) this.decalMesh.geometry.dispose();
-    this.decalMaterial?.normalMap?.dispose();
-    this.decalMaterial?.dispose();
-    this.decalTexture?.dispose();
+    for (const [id, slot] of [...this.decals]) this.disposeSlot(id, slot);
+    this.decalNormalMap?.dispose();
     this.scene.environment?.dispose();
     this.pmrem.dispose();
     this.renderer.dispose();

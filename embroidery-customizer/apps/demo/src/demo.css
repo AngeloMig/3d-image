@@ -1,10 +1,11 @@
 /* Demo storefront chrome only — the configurator itself is styled inside its shadow root. */
 :root {
   color-scheme: light;
-  --demo-ink: #1f1d1a;
-  --demo-muted: #6c675f;
-  --demo-line: #e5e1d8;
-  --demo-bg: #fbfaf7;
+  --demo-ink: #1f1b16;
+  --demo-muted: #6f675c;
+  --demo-line: #e8e1d6;
+  --demo-bg: #f6f3ee;
+  --demo-accent: #3d5a49;
 }
 * {
   box-sizing: border-box;
@@ -17,6 +18,7 @@ body {
   background: var(--demo-bg);
   color: var(--demo-ink);
   font-family:
+    'Geist Variable',
     ui-sans-serif,
     -apple-system,
     BlinkMacSystemFont,
@@ -34,24 +36,33 @@ body {
   justify-content: space-between;
   align-items: center;
   gap: 12px;
-  padding: 12px clamp(16px, 4vw, 40px);
-  background: rgba(251, 250, 247, 0.92);
-  backdrop-filter: blur(10px);
+  min-height: 76px;
+  padding: 16px clamp(20px, 4vw, 64px);
+  background: color-mix(in srgb, #fffdfa 88%, transparent);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
   border-bottom: 1px solid var(--demo-line);
 }
 .demo-bar__brand {
   display: flex;
   align-items: center;
   gap: 10px;
-  font-weight: 600;
+  font-weight: 650;
+  font-size: 18px;
+  letter-spacing: -0.025em;
   min-width: 0;
 }
 .demo-bar__mark {
-  color: #9c7a45;
+  color: var(--demo-accent);
+  display: flex;
 }
 .demo-bar__tag {
   font-weight: 400;
-  font-size: 12.5px;
+  font-size: 12px;
+  letter-spacing: 0;
+  margin-left: 18px;
+  padding-left: 24px;
+  border-left: 1px solid var(--demo-line);
   color: var(--demo-muted);
   white-space: nowrap;
   overflow: hidden;
@@ -69,8 +80,8 @@ body {
   flex: none;
   border: 1px solid var(--demo-line);
   background: #fff;
-  border-radius: 999px;
-  padding: 8px 8px 8px 14px;
+  border-radius: 7px;
+  padding: 7px 9px 7px 12px;
   font: inherit;
   font-size: 14px;
   font-weight: 500;
@@ -88,10 +99,10 @@ body {
   font-size: 12px;
 }
 .demo-main {
-  padding: clamp(16px, 3vw, 36px) clamp(16px, 4vw, 40px) 64px;
+  padding: 40px clamp(20px, 4vw, 64px) 64px;
 }
 :focus-visible {
-  outline: 2px solid #9c7a45;
+  outline: 2px solid #526558;
   outline-offset: 2px;
 }
 
@@ -136,7 +147,7 @@ body {
   margin: 0;
   font-size: 12.5px;
   color: var(--demo-muted);
-  background: #f6f3ec;
+  background: #f3f5f4;
   padding: 10px 12px;
   border-radius: 10px;
 }
@@ -171,7 +182,7 @@ body {
   height: 76px;
   border-radius: 10px;
   object-fit: cover;
-  background: #f1eee7;
+  background: #edf0ee;
   display: block;
 }
 .demo-line__top {
@@ -242,4 +253,169 @@ body {
   padding-top: 12px;
   border-top: 1px solid var(--demo-line);
   font-size: 15px;
+}
+.demo-fee {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 6px 0 0;
+  font-size: 12.5px;
+  color: var(--demo-muted);
+}
+.demo-qty {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--demo-line);
+  border-radius: 999px;
+}
+.demo-qty button {
+  border: 0;
+  background: none;
+  width: 30px;
+  height: 30px;
+  cursor: pointer;
+  font-size: 16px;
+}
+.demo-qty span {
+  min-width: 18px;
+  text-align: center;
+  font-size: 13px;
+}
+.demo-line__actions {
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.demo-bar__brand-dot {
+  color: var(--demo-accent);
+}
+.demo-bar__cart:hover {
+  border-color: #99a69d;
+  background: #f7f8f7;
+}
+@media (max-width: 560px) {
+  .demo-bar {
+    min-height: 64px;
+    padding: 12px 20px;
+  }
+  .demo-main {
+    padding-top: 28px;
+  }
+}
+
+body {
+  font-feature-settings: 'ss01', 'cv11';
+}
+.demo-bar__count {
+  background: var(--demo-accent);
+}
+.demo-btn {
+  background: var(--demo-accent);
+  border-color: var(--demo-accent);
+}
+
+/* ---------- design style switch (demo only) ---------- */
+.demo-bar__right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.demo-theme {
+  display: inline-flex;
+  padding: 3px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.05);
+}
+.demo-theme button {
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  padding: 6px 12px;
+  border-radius: 999px;
+  cursor: pointer;
+  color: var(--demo-muted);
+}
+.demo-theme button.is-on {
+  background: #fff;
+  color: var(--demo-ink);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+}
+@media (max-width: 560px) {
+  .demo-theme button {
+    padding: 6px 9px;
+  }
+}
+
+/* ---------- Sport chrome ---------- */
+html[data-demo-theme='sport'] {
+  --demo-ink: #111;
+  --demo-muted: #707072;
+  --demo-line: #e5e5e5;
+  --demo-bg: #ffffff;
+  --demo-accent: #111;
+}
+html[data-demo-theme='sport'] body {
+  font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+}
+html[data-demo-theme='sport'] .demo-bar {
+  background: #fff;
+  min-height: 60px;
+}
+html[data-demo-theme='sport'] .demo-bar__brand {
+  font-weight: 800;
+  letter-spacing: -0.04em;
+  text-transform: uppercase;
+  font-style: italic;
+}
+html[data-demo-theme='sport'] .demo-bar__cart {
+  border-radius: 999px;
+  border-color: transparent;
+  background: #f5f5f5;
+}
+html[data-demo-theme='sport'] .demo-btn {
+  border-radius: 999px;
+}
+
+@media (max-width: 560px) {
+  .demo-bar {
+    padding: 10px 16px;
+    gap: 8px;
+  }
+  .demo-bar__brand {
+    font-size: 15px;
+    white-space: nowrap;
+    gap: 6px;
+  }
+  .demo-bar__tag {
+    display: none;
+  }
+  .demo-bar__right {
+    gap: 6px;
+  }
+  .demo-theme button {
+    font-size: 12px;
+    padding: 5px 8px;
+  }
+  .demo-bar__cart {
+    padding: 6px 6px 6px 10px;
+    font-size: 0;
+    gap: 6px;
+  }
+  .demo-bar__count {
+    font-size: 12px;
+  }
+}
+
+/* ---------- Clean chrome ---------- */
+html[data-demo-theme='clean'] {
+  --demo-ink: #1f1d1a;
+  --demo-muted: #6c675f;
+  --demo-line: #e5e1d8;
+  --demo-bg: #fbfaf7;
+  --demo-accent: #1f1d1a;
+}
+html[data-demo-theme='clean'] body {
+  font-family: 'Assistant', 'Helvetica Neue', Arial, sans-serif;
 }

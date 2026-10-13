@@ -6,7 +6,7 @@ import {
   type GarmentInfo,
   type ViewerCallbacks,
 } from '../engine/garmentViewer';
-import { IconBack, IconFront, IconMinus, IconPlus, IconReset } from './icons';
+import { IconBack, IconFront, IconMinus, IconPlus, IconReset, IconRotate } from './icons';
 
 export type ViewerStatus =
   | { state: 'loading'; progress: number }
@@ -62,7 +62,7 @@ export function Viewer(p: ViewerProps) {
           setFacing(f);
           callbacks.current.onFacingChange?.(f);
         },
-        onDesignDrag: (dx, dy, phase) => callbacks.current.onDesignDrag(dx, dy, phase),
+        onDesignDrag: (dx, dy, phase, id) => callbacks.current.onDesignDrag(dx, dy, phase, id),
         onContextLost: () =>
           setStatus({
             state: 'error',
@@ -131,6 +131,17 @@ export function Viewer(p: ViewerProps) {
 
   return (
     <div class="emb-viewer" data-testid="viewer" data-status={status.state}>
+      <div class="emb-viewer__heading">
+        <span class="emb-viewer__label">3D preview</span>
+        <span class={`emb-viewer__status${ready ? ' is-ready' : ''}`}>
+          <span aria-hidden="true" />
+          {ready
+            ? 'Live preview'
+            : status.state === 'loading'
+              ? 'Preparing preview'
+              : 'Preview unavailable'}
+        </span>
+      </div>
       <div
         ref={stage}
         class="emb-viewer__stage"
@@ -144,11 +155,19 @@ export function Viewer(p: ViewerProps) {
 
       {status.state === 'loading' ? (
         <div class="emb-viewer__overlay" role="status">
-          <span class="emb-spinner" aria-hidden="true" />
+          <IconFront />
+          <strong>Getting your garment ready</strong>
           <span>
-            Loading 3D garment
-            {status.progress > 0 ? ` · ${Math.round(status.progress * 100)}%` : '…'}
+            {status.progress > 0
+              ? `${Math.round(status.progress * 100)}% loaded`
+              : 'Loading the 3D preview…'}
           </span>
+          <progress
+            class="emb-viewer__progress"
+            max={1}
+            value={status.progress > 0 ? status.progress : undefined}
+            aria-label="Loading 3D garment"
+          />
         </div>
       ) : null}
       {status.state === 'error' || status.state === 'unsupported' ? (
@@ -169,64 +188,74 @@ export function Viewer(p: ViewerProps) {
         </div>
       ) : null}
 
-      <div class="emb-viewer__toolbar" role="toolbar" aria-label="3D view controls">
-        <button
-          type="button"
-          class="emb-tool"
-          onClick={() => v()?.setView('front')}
-          disabled={!ready}
-          aria-pressed={facing === 'front'}
-        >
-          <IconFront />
-          <span>Front</span>
-        </button>
-        <button
-          type="button"
-          class="emb-tool"
-          onClick={() => v()?.setView('back')}
-          disabled={!ready}
-          aria-pressed={facing === 'back'}
-        >
-          <IconBack />
-          <span>Back</span>
-        </button>
-        <span class="emb-viewer__sep" aria-hidden="true" />
-        <button
-          type="button"
-          class="emb-tool emb-tool--icon"
-          onClick={() => v()?.zoomBy(0.82)}
-          disabled={!ready}
-          aria-label="Zoom in"
-        >
-          <IconPlus />
-        </button>
-        <button
-          type="button"
-          class="emb-tool emb-tool--icon"
-          onClick={() => v()?.zoomBy(1.2)}
-          disabled={!ready}
-          aria-label="Zoom out"
-        >
-          <IconMinus />
-        </button>
-        <button
-          type="button"
-          class="emb-tool emb-tool--icon"
-          onClick={() => v()?.setView('home')}
-          disabled={!ready}
-          aria-label="Reset view"
-        >
-          <IconReset />
-        </button>
-      </div>
+      <div class="emb-viewer__controls">
+        <div class="emb-viewer__toolbar" role="group" aria-label="3D view controls">
+          <div class="emb-viewer__views" role="group" aria-label="Garment side">
+            <button
+              type="button"
+              class="emb-tool"
+              onClick={() => v()?.setView('front')}
+              disabled={!ready}
+              aria-pressed={facing === 'front'}
+            >
+              <IconFront />
+              <span>Front</span>
+            </button>
+            <button
+              type="button"
+              class="emb-tool"
+              onClick={() => v()?.setView('back')}
+              disabled={!ready}
+              aria-pressed={facing === 'back'}
+            >
+              <IconBack />
+              <span>Back</span>
+            </button>
+          </div>
+          <div class="emb-viewer__tools" role="group" aria-label="Zoom and reset">
+            <button
+              type="button"
+              class="emb-tool emb-tool--icon"
+              onClick={() => v()?.zoomBy(1.2)}
+              disabled={!ready}
+              aria-label="Zoom out"
+              title="Zoom out"
+            >
+              <IconMinus />
+            </button>
+            <button
+              type="button"
+              class="emb-tool emb-tool--icon"
+              onClick={() => v()?.zoomBy(0.82)}
+              disabled={!ready}
+              aria-label="Zoom in"
+              title="Zoom in"
+            >
+              <IconPlus />
+            </button>
+            <span class="emb-viewer__sep" aria-hidden="true" />
+            <button
+              type="button"
+              class="emb-tool emb-tool--icon"
+              onClick={() => v()?.setView('home')}
+              disabled={!ready}
+              aria-label="Reset view"
+              title="Reset view"
+            >
+              <IconReset />
+            </button>
+          </div>
+        </div>
 
-      {ready ? (
-        <p class="emb-viewer__hint" aria-hidden="true">
-          {p.dragHint
-            ? 'Drag the design to move it · drag the shirt to rotate'
-            : 'Drag to rotate · scroll or pinch to zoom'}
-        </p>
-      ) : null}
+        {ready ? (
+          <p class="emb-viewer__hint" aria-hidden="true">
+            <IconRotate />
+            {p.dragHint
+              ? 'Drag the design to move it · drag the shirt to rotate'
+              : 'Drag to rotate · scroll or pinch to zoom'}
+          </p>
+        ) : null}
+      </div>
       {showBackHint ? (
         <button
           type="button"

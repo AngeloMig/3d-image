@@ -5,12 +5,18 @@
   line item title/variant. Text only (packing slips don't load external images); staff look up
   the original artwork in Apps → Embroidery Customizer using the Customization ID.
 {%- endcomment -%}
-{%- assign emb_keys = 'Embroidery Type|Embroidery Text|Artwork File|Font|Thread Color|Placement|Embroidery Size|Position Adjustment|Rotation|Customization ID' | split: '|' -%}
+{%- assign emb_keys = 'Embroidery Designs|Embroidery Type|Embroidery Text|Artwork File|Background Removed|Embroidery Style|Font|Thread Color|Placement|Embroidery Size|Position Adjustment|Rotation|Team Order|Customization ID' | split: '|' -%}
 {%- capture emb_rows -%}
   {%- for property in line_item.properties -%}
     {%- assign emb_name = property.name | default: property.first -%}
     {%- assign emb_value = property.value | default: property.last -%}
-    {%- if emb_keys contains emb_name and emb_value != blank -%}
+    {%- comment -%} Designs 2+ use keys like "Design 2 – Placement". {%- endcomment -%}
+    {%- assign emb_prefix = emb_name | slice: 0, 7 -%}
+    {%- assign emb_numbered = false -%}
+    {%- if emb_prefix == 'Design ' and emb_name contains ' – ' -%}
+      {%- assign emb_numbered = true -%}
+    {%- endif -%}
+    {%- if emb_value != blank and emb_keys contains emb_name or emb_value != blank and emb_numbered -%}
       <tr>
         <td style="padding: 1px 8px 1px 0; color: #555; white-space: nowrap; vertical-align: top;">{{ emb_name | escape }}</td>
         <td style="padding: 1px 0; font-weight: 600;">{{ emb_value | escape }}</td>

@@ -3,11 +3,15 @@
  * Shared by the storefront widget, cart adapters and the app backend.
  */
 
-export const SCHEMA_VERSION = 1 as const;
+/** v2: a configuration holds one or more design layers. v1 (single design) is upgraded on parse. */
+export const SCHEMA_VERSION = 2 as const;
 
 export type DesignType = 'text' | 'image';
 export type TextAlignment = 'left' | 'center' | 'right';
 export type AllowedImageMime = 'image/png' | 'image/jpeg' | 'image/webp';
+
+/** Embroidery technique. Affects the 3D look and the price. */
+export type StitchStyle = 'flat' | 'puff' | 'metallic' | 'patch' | 'chenille';
 
 export interface TextDesign {
   type: 'text';
@@ -19,6 +23,8 @@ export interface TextDesign {
   /** Extra tracking in em units (0 = font default). */
   letterSpacing: number;
   alignment: TextAlignment;
+  /** Defaults to 'flat' when missing (older saved designs). */
+  stitchStyle?: StitchStyle;
 }
 
 export interface ImageDesign {
@@ -34,6 +40,9 @@ export interface ImageDesign {
   heightPx: number;
   /** Normalized artwork width: 0.2–1 of the placement's maximum width. */
   scale: number;
+  /** True when the customer used "remove background" (the stored file is the cleaned PNG). */
+  backgroundRemoved?: boolean;
+  stitchStyle?: StitchStyle;
 }
 
 export type EmbroideryDesign = TextDesign | ImageDesign;
@@ -104,13 +113,22 @@ export interface RenderedDimensions {
   fitted: boolean;
 }
 
+/** One design (text or artwork) stitched at one position. A garment can carry several. */
+export interface DesignLayer {
+  layerId: string;
+  design: EmbroideryDesign;
+  placement: Placement;
+  rendered: RenderedDimensions | null;
+}
+
 export interface EmbroideryConfiguration {
   configurationId: string;
   schemaVersion: typeof SCHEMA_VERSION;
   product: ProductSelection;
-  design: EmbroideryDesign;
-  placement: Placement;
-  rendered: RenderedDimensions | null;
+  /** 1..LIMITS.maxDesigns layers, each at a different position. */
+  layers: DesignLayer[];
+  /** Set when the item was added as part of a team / bulk order. */
+  teamOrderId?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -147,4 +165,6 @@ export interface ProductContext {
 export interface ValidationIssue {
   field: string;
   message: string;
+  /** Index of the design layer the issue belongs to (multi-design items). */
+  layer?: number;
 }

@@ -39,7 +39,7 @@ export class FallbackPersistence implements PersistenceAdapter {
     try {
       return await this.primary.saveConfiguration(config);
     } catch (e) {
-      if (!FallbackPersistence.unreachable(e) || config.design.type !== 'text') throw e;
+      if (!FallbackPersistence.unreachable(e) || config.layers.some((l) => l.design.type !== 'text')) throw e;
       console.warn(
         '[embroidery] App proxy unreachable — keeping this text design in the browser only.',
         e,

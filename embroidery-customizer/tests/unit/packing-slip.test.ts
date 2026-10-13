@@ -46,4 +46,25 @@ describe('packing slip snippet', () => {
   it('renders nothing for non-embroidered items', async () => {
     expect((await render({ title: 'Socks', properties: {} })).trim()).toBe('');
   });
+
+  it('includes additional designs and team labels', async () => {
+    const html = await render({
+      title: 'Tee',
+      properties: {
+        ...props,
+        'Embroidery Designs': '2',
+        'Design 2 – Type': 'Logo / Image',
+        'Design 2 – Artwork File': 'crest.png',
+        'Design 2 – Placement': 'Center Back',
+        '_Design 2 – Artwork Ref': 'art_hidden',
+        'Team Order': 'AB12CD34 (3 of 12)',
+        'Design notes': 'not ours',
+      },
+    });
+    expect(html).toContain('crest.png');
+    expect(html).toContain('Center Back');
+    expect(html).toContain('AB12CD34 (3 of 12)');
+    expect(html).not.toContain('art_hidden');
+    expect(html).not.toContain('not ours');
+  });
 });

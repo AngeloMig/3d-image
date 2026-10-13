@@ -43,6 +43,19 @@ const PRODUCT = {
   ),
 };
 
+/** Simulated "Embroidery fee" product: one variant per fee code, priced by "Shopify". */
+const FEE_VARIANTS = [
+  { id: 9001, title: 'Text', price: 500 },
+  { id: 9002, title: 'Logo', price: 800 },
+  { id: 9003, title: 'Medium size', price: 300 },
+  { id: 9004, title: 'Large size', price: 600 },
+  { id: 9005, title: '3D Puff', price: 400 },
+  { id: 9006, title: 'Metallic thread', price: 300 },
+  { id: 9007, title: 'Woven patch', price: 600 },
+  { id: 9008, title: 'Chenille', price: 700 },
+  { id: 9009, title: 'Premium font', price: 200 },
+];
+
 const state = {
   lines: [] as Line[],
   artwork: new Map<string, { bytes: Buffer; type: string; filename: string }>(),
@@ -55,6 +68,13 @@ const lineKey = (variantId: number, properties: Record<string, string>) =>
     .digest('hex')}`;
 
 const item = (l: Line) => {
+  const fee = FEE_VARIANTS.find((x) => x.id === l.variant_id);
+  if (fee)
+    return {
+      key: l.key, id: l.variant_id, variant_id: l.variant_id, quantity: l.quantity, properties: l.properties,
+      product_title: 'Embroidery fee', variant_title: fee.title, title: `Embroidery fee - ${fee.title}`,
+      handle: 'embroidery-fee', price: fee.price, image: null,
+    };
   const v = PRODUCT.variants.find((x) => x.id === l.variant_id);
   return {
     key: l.key,
@@ -123,7 +143,9 @@ export function mockShopify() {
           }>) ?? [];
         const added = [];
         for (const it of items) {
-          const v = PRODUCT.variants.find((x) => x.id === Number(it.id));
+          const v =
+            PRODUCT.variants.find((x) => x.id === Number(it.id)) ??
+            FEE_VARIANTS.map((f) => ({ ...f, available: true })).find((x) => x.id === Number(it.id));
           if (!v) return send(res, 404, { status: 404, description: 'Cannot find variant' });
           if (!v.available)
             return send(res, 422, {
@@ -150,6 +172,16 @@ export function mockShopify() {
         return send(res, 200, cart());
       }
 
+      if (path === '/cart/update.js' && req.method === 'POST') {
+        const body = await readJson(req);
+        const updates = (body.updates ?? {}) as Record<string, number>;
+        for (const [key, qty] of Object.entries(updates)) {
+          const line = state.lines.find((l) => l.key === key);
+          if (line) line.quantity = Math.max(0, Number(qty) || 0);
+        }
+        state.lines = state.lines.filter((l) => l.quantity > 0);
+        return send(res, 200, cart());
+      }
       // ---- app proxy (/apps/embroidery/*) ----
       if (path === '/apps/embroidery/artwork' && req.method === 'POST') {
         const request = new Request(`http://localhost${req.url}`, {
@@ -182,7 +214,7 @@ export function mockShopify() {
           requireStoredArtwork: true,
         });
         if (issues.length) return send(res, 422, { error: issues[0]!.message, issues });
-        if (config.design.type === 'image' && !state.artwork.has(config.design.storageRef!))
+        if (config.layers.some((l) => l.design.type === 'image' && !state.artwork.has(l.design.storageRef!)))
           return send(res, 422, { error: 'Unknown artwork reference.' });
         const configRef = `cfg_${randomUUID().replace(/-/g, '').slice(0, 20)}`;
         state.configs.set(configRef, serializeConfiguration(config));

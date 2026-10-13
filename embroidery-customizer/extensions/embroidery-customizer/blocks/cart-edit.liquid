@@ -3,6 +3,16 @@
   Theme-neutral — it finds each line by its visible "Customization ID" property. Themes can
   also place <span data-embroidery-edit-slot="{{ item.key }}"></span> inside the line markup.
 {%- endcomment -%}
+{%- capture fee_json -%}
+  [
+  {%- if block.settings.fee_product != blank -%}
+    {%- for v in block.settings.fee_product.variants -%}
+      {"title": {{ v.title | json }}, "price": {{ v.price | json }}, "id": {{ v.id | json }}, "available": {{ v.available | json }}}
+      {%- unless forloop.last -%},{%- endunless -%}
+    {%- endfor -%}
+  {%- endif -%}
+  ]
+{%- endcapture -%}
 <div
   hidden
   data-embroidery-cart-edit
@@ -13,6 +23,7 @@
   data-currency="{{ cart.currency.iso_code }}"
   data-locale="{{ request.locale.iso_code }}"
   data-label="{{ block.settings.label | escape }}"
+  data-fee-variants="{{ fee_json | strip | escape }}"
 ></div>
 <style>
   .embroidery-edit-button {
@@ -32,6 +43,7 @@
   "settings": [
     { "type": "text", "id": "label", "label": "Button label", "default": "Edit embroidery" },
     { "type": "text", "id": "proxy_path", "label": "App proxy path", "default": "/apps/embroidery" },
+    { "type": "product", "id": "fee_product", "label": "Embroidery fee product", "info": "Same product as in the Embroidery customizer block, so edits keep fees correct." },
     { "type": "text", "id": "model_url", "label": "Model asset name", "info": "Leave empty to use the bundled sample T-shirt." }
   ]
 }

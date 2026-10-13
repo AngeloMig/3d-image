@@ -7,6 +7,7 @@ export interface DebugState {
   decalVisible: boolean;
   decalTriangles: number;
   decalCenter: [number, number, number] | null;
+  decals?: { id: string; center: number[]; triangles: number }[];
   tint: { mix: number; color: string }[];
 }
 

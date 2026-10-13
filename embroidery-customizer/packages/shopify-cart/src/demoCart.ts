@@ -1,4 +1,5 @@
-import { mergeLineItemProperties, readCustomization, type LineItemProperties } from './properties';
+import { expandWithFees, feeLinesFor, planFeeSync, type WireItem } from './fees';
+import { mergeLineItemProperties, readCustomization, readFee, type LineItemProperties } from './properties';
 import { findTargetLine } from './shopifyCart';
 import {
   CartError,
@@ -84,7 +85,7 @@ export class DemoCartAdapter implements CartAdapter {
     return { lines, itemCount: lines.reduce((n, l) => n + l.quantity, 0), currency: 'USD' };
   }
 
-  private upsert(lines: CartLine[], input: AddItemInput, at?: number): CartLine {
+  private upsert(lines: CartLine[], input: WireItem, at?: number): CartLine {
     const key = demoLineKey(input.variantId, input.properties);
     const existing = lines.find((l) => l.key === key);
     if (existing) {
@@ -112,37 +113,41 @@ export class DemoCartAdapter implements CartAdapter {
   }
 
   async addItem(input: AddItemInput): Promise<CartLine> {
-    if (!(input.quantity >= 1)) throw new CartError('Quantity must be at least 1.', 422);
+    const [line] = await this.addItems([input]);
+    return line!;
+  }
+
+  async addItems(inputs: AddItemInput[]): Promise<CartLine[]> {
+    if (inputs.some((i) => !(i.quantity >= 1))) throw new CartError('Quantity must be at least 1.', 422);
     const lines = this.read();
-    const line = this.upsert(lines, input);
+    const added: CartLine[] = [];
+    for (const item of expandWithFees(inputs)) {
+      const line = this.upsert(lines, item);
+      if (!readFee(line.properties)) added.push({ ...line });
+    }
     this.write(lines);
-    return { ...line };
+    return added;
   }
 
   async updateCustomizedItem(input: UpdateItemInput): Promise<CartLine> {
-    const lines = this.read();
+    let lines = this.read();
     const target = findTargetLine(lines, input.lineKey, input.customizationId);
     if (!target) throw new CartError('This item is no longer in your cart.', 404);
     const index = lines.indexOf(target);
     lines.splice(index, 1);
+    const oldFees = new Set(feeLinesFor(lines, input.customizationId).map((l) => l.key));
+    lines = lines.filter((l) => !oldFees.has(l.key));
     const properties = mergeLineItemProperties(target.properties, input.properties);
-    const line = this.upsert(
-      lines,
-      {
-        variantId: input.variantId,
-        quantity: input.quantity,
-        properties,
-        sellingPlanId: target.sellingPlanId,
-        meta: input.meta ?? {
-          title: target.title,
-          variantTitle: target.variantTitle ?? '',
-          price: target.price ?? 0,
-          image: target.image,
-        },
-      },
-      index,
-    );
+    const meta = input.meta ?? {
+      title: target.title,
+      variantTitle: target.variantTitle ?? '',
+      price: target.price ?? 0,
+      image: target.image,
+    };
+    const [item, ...fees] = expandWithFees([{ ...input, properties, meta }]);
+    const line = this.upsert(lines, { ...item!, sellingPlanId: target.sellingPlanId }, Math.min(index, lines.length));
     if (input.meta?.image === undefined && target.image) line.image = target.image;
+    fees.forEach((f, i) => this.upsert(lines, f, Math.min(lines.indexOf(line) + 1 + i, lines.length)));
     this.write(lines);
     if (readCustomization(line.properties).customizationId !== input.customizationId)
       throw new CartError('Updated line lost its customization reference.');
@@ -150,7 +155,29 @@ export class DemoCartAdapter implements CartAdapter {
   }
 
   async removeLine(key: string): Promise<CartSnapshot> {
-    return this.write(this.read().filter((l) => l.key !== key));
+    const lines = this.read();
+    const line = lines.find((l) => l.key === key);
+    const id = line ? readCustomization(line.properties).customizationId : null;
+    const drop = new Set([key, ...(id ? feeLinesFor(lines, id).map((f) => f.key) : [])]);
+    return this.write(lines.filter((l) => !drop.has(l.key)));
+  }
+
+  async setQuantity(key: string, quantity: number): Promise<CartSnapshot> {
+    const lines = this.read();
+    const line = lines.find((l) => l.key === key);
+    if (line) line.quantity = Math.max(0, Math.round(quantity));
+    this.write(lines.filter((l) => l.quantity > 0));
+    return (await this.syncFees()) ?? this.snapshot(this.read());
+  }
+
+  async syncFees(): Promise<CartSnapshot | null> {
+    const lines = this.read();
+    const { updates, additions } = planFeeSync(lines);
+    if (Object.keys(updates).length === 0 && additions.length === 0) return null;
+    for (const l of lines) if (l.key in updates) l.quantity = updates[l.key]!;
+    const kept = lines.filter((l) => l.quantity > 0);
+    for (const a of additions) this.upsert(kept, a);
+    return this.write(kept);
   }
 
   subscribe(listener: CartListener): () => void {

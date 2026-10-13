@@ -2,6 +2,8 @@ import { expect, test } from '@playwright/test';
 import { pngLogo, trackErrors, viewerState, waitForViewer } from './helpers';
 
 const HOST = '[data-embroidery-root]';
+// Customized rows only (fee rows have no Customization ID).
+const ITEM_ROWS = 'tr.cart-item:has-text("Customization ID")';
 
 test.beforeEach(async ({ page, request }) => {
   await request.post('/__mock/reset');
@@ -37,14 +39,21 @@ test('Shopify path: lazy loader mounts, adds real variant with properties, edits
     'Thread Color': 'White',
   });
   expect(body.items[0]!.properties['_Embroidery Config Ref']).toMatch(/^cfg_/);
-  await expect(page.locator('[data-cart-count]')).toHaveText('1');
+  // the text embroidery fee rides along as its own line, priced by Shopify (variant 9001)
+  expect(body.items[1]).toMatchObject({
+    id: 9001,
+    quantity: 1,
+    properties: { '_Embroidery Fee Kind': 'text' },
+  });
+  // Shopify's item_count includes the embroidery fee line (1 shirt + 1 text fee).
+  await expect(page.locator('[data-cart-count]')).toHaveText('2');
 
   // second, different configuration → distinct line
   await page.getByTestId('step-2').click();
   await page.getByTestId('text-input').fill('TEAM');
   await page.getByTestId('step-4').click();
   await page.getByTestId('add-to-cart').click();
-  await expect(page.locator('tr.cart-item')).toHaveCount(2);
+  await expect(page.locator(ITEM_ROWS)).toHaveCount(2);
 
   // unrelated property on line 1 must survive the edit
   await page.evaluate(async () => {
@@ -81,10 +90,10 @@ test('Shopify path: lazy loader mounts, adds real variant with properties, edits
   expect(changeBody.properties['Embroidery Text']).toBe('UPDATED');
 
   await reloaded;
-  await expect(page.locator('tr.cart-item')).toHaveCount(2);
-  await expect(page.locator('tr.cart-item').nth(0)).toContainText('UPDATED');
-  await expect(page.locator('tr.cart-item').nth(0)).toContainText('Keep me');
-  await expect(page.locator('tr.cart-item').nth(1)).toContainText('TEAM');
+  await expect(page.locator(ITEM_ROWS)).toHaveCount(2);
+  await expect(page.locator(ITEM_ROWS).nth(0)).toContainText('UPDATED');
+  await expect(page.locator(ITEM_ROWS).nth(0)).toContainText('Keep me');
+  await expect(page.locator(ITEM_ROWS).nth(1)).toContainText('TEAM');
   expect(errors.filter((e) => !e.includes('favicon'))).toEqual([]);
 });
 
@@ -103,7 +112,7 @@ test('Shopify path: logo is uploaded through the app proxy before add to cart', 
   await page.getByTestId('step-4').click();
   await page.getByTestId('add-to-cart').click();
   expect((await upload).status()).toBe(201);
-  await expect(page.locator('tr.cart-item')).toContainText('brand.png');
+  await expect(page.locator(ITEM_ROWS)).toContainText('brand.png');
   const cart = await page.evaluate(async () => (await fetch('/cart.js')).json());
   const props = cart.items[0].properties as Record<string, string>;
   expect(props['_Embroidery Artwork Ref']).toMatch(/^art_/);

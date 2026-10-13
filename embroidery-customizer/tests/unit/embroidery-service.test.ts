@@ -134,14 +134,13 @@ describe('embroidery service', () => {
 
     const bad: EmbroideryConfiguration = {
       ...text,
-      design: { ...text.design, text: '' } as EmbroideryConfiguration['design'],
+      layers: [{ ...text.layers[0]!, design: { ...text.layers[0]!.design, text: '' } as EmbroideryConfiguration['layers'][0]['design'] }],
     };
     await expect(svc.saveConfiguration(SHOP, serializeConfiguration(bad))).rejects.toBeInstanceOf(
       EmbroideryError,
     );
 
-    const image: EmbroideryConfiguration = {
-      ...text,
+    const image: EmbroideryConfiguration = createConfiguration(TSHIRT_V1, product, {
       design: {
         type: 'image',
         storageRef: 'art_000000000000000000000000',
@@ -153,7 +152,7 @@ describe('embroidery service', () => {
         heightPx: 100,
         scale: 0.5,
       },
-    };
+    });
     await expect(svc.saveConfiguration(SHOP, serializeConfiguration(image))).rejects.toMatchObject({
       message: 'Unknown artwork reference.',
     });

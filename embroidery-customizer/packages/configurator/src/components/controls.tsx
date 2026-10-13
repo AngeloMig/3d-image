@@ -81,7 +81,7 @@ export function Choice<T extends string>(p: {
   value: T;
   options: ChoiceOption<T>[];
   onChange: (v: T) => void;
-  variant?: 'segmented' | 'cards' | 'swatches' | 'chips';
+  variant?: 'segmented' | 'cards' | 'swatches' | 'chips' | 'pills';
   hideLabel?: boolean;
   testId?: string;
 }) {

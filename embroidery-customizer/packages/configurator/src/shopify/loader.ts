@@ -69,6 +69,7 @@ interface CartEditConfig {
   currency: string;
   locale: string;
   label: string;
+  feeVariants: unknown;
 }
 
 const CUSTOMIZATION_KEY = 'Customization ID';
@@ -102,6 +103,7 @@ function editButton(cfg: CartEditConfig, item: CartItem): HTMLButtonElement {
         modelUrl: cfg.modelUrl,
         currency: cfg.currency,
         locale: cfg.locale,
+        feeVariants: cfg.feeVariants as never,
       });
     } catch (error) {
       console.error('[embroidery] could not open editor', error);
@@ -121,6 +123,69 @@ function editButton(cfg: CartEditConfig, item: CartItem): HTMLButtonElement {
  * showing the line's Customization ID and insert the button next to it. Themes can instead add
  * `<span data-embroidery-edit-slot="{{ item.key }}"></span>` anywhere in the line markup.
  */
+const FEE_FOR = '_Embroidery Fee For';
+const FEE_PER_ITEM = '_Embroidery Fee Per Item';
+
+/**
+ * Embroidery fee lines must follow their item: remove fees whose item was removed and match
+ * fee quantity to item quantity after customers change it in the theme's cart. Returns true if
+ * the cart was changed (then the cart page reloads so theme markup and totals refresh).
+ */
+async function syncFees(cfg: CartEditConfig, items: CartItem[]): Promise<boolean> {
+  const qty = new Map<string, number>();
+  for (const i of items) {
+    const id = i.properties?.[CUSTOMIZATION_KEY];
+    if (id && !i.properties?.[FEE_FOR]) qty.set(id, (qty.get(id) ?? 0) + i.quantity);
+  }
+  const updates: Record<string, number> = {};
+  const additions: Record<string, unknown>[] = [];
+  // Restore fee lines the customer deleted (each item lists what it owes in "_Embroidery Fees").
+  for (const i of items) {
+    const id = i.properties?.[CUSTOMIZATION_KEY];
+    const plan = i.properties?.['_Embroidery Fees'];
+    if (!id || i.properties?.[FEE_FOR] || !plan) continue;
+    for (const part of plan.split(';')) {
+      const [code, per, variantId] = part.split(':');
+      const present = items.some((f) => f.properties?.[FEE_FOR] === id && f.properties?.['_Embroidery Fee Kind'] === code);
+      if (!present && code && Number(per) > 0 && variantId)
+        additions.push({
+          id: Number(variantId),
+          quantity: Number(per) * (qty.get(id) ?? i.quantity),
+          properties: {
+            For: `${i.properties?.['Embroidery Text'] ?? 'Custom item'} · ${id.slice(0, 8)}`,
+            [FEE_FOR]: id,
+            '_Embroidery Fee Kind': code,
+            [FEE_PER_ITEM]: per,
+          },
+        });
+    }
+  }
+  for (const i of items) {
+    const forId = i.properties?.[FEE_FOR];
+    const per = Number(i.properties?.[FEE_PER_ITEM]);
+    if (!forId || !(per > 0)) continue;
+    const expected = per * (qty.get(forId) ?? 0);
+    if (expected !== i.quantity) updates[i.key] = expected;
+  }
+  if (!Object.keys(updates).length && !additions.length) return false;
+  const post = (path: string, body: unknown) =>
+    fetch(`${cfg.root}${path}`, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify(body),
+    });
+  try {
+    if (Object.keys(updates).length) await post('cart/update.js', { updates });
+    if (additions.length) await post('cart/add.js', { items: additions });
+  } catch {
+    return false;
+  }
+  document.dispatchEvent(new CustomEvent('embroidery:cart:changed'));
+  if (/\/cart\/?$/.test(location.pathname)) location.reload();
+  return true;
+}
+
 async function decorateCart(cfg: CartEditConfig): Promise<void> {
   let cart: { items: CartItem[] };
   try {
@@ -132,6 +197,8 @@ async function decorateCart(cfg: CartEditConfig): Promise<void> {
   } catch {
     return;
   }
+  if (await syncFees(cfg, cart.items)) return; // cart changed — the page reloads / re-renders
+
   for (const item of cart.items) {
     const id = item.properties?.[CUSTOMIZATION_KEY];
     if (!id || !item.properties?.[CONFIG_REF_KEY]) continue;
@@ -181,6 +248,13 @@ function initCartEdit(): void {
     currency: el.dataset.currency || 'USD',
     locale: el.dataset.locale || 'en',
     label: el.dataset.label || 'Edit embroidery',
+    feeVariants: (() => {
+      try {
+        return el.dataset.feeVariants ? (JSON.parse(el.dataset.feeVariants) as unknown) : null;
+      } catch {
+        return null;
+      }
+    })(),
   };
   let timer = 0;
   const schedule = () => {

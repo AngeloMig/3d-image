@@ -34,20 +34,23 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     storageKind,
     designs: rows.map((r) => {
       const c = parseConfiguration(r.json);
-      const preset = getPreset(getModelAdapter(c.product.modelId), c.placement.positionId);
+      const adapter = getModelAdapter(c.product.modelId);
       return {
         id: r.id,
         customizationId: r.customizationId,
         createdAt: r.createdAt.toISOString(),
         order: r.orderName ?? null,
         variant: c.product.variantTitle ?? c.product.variantId,
-        placement: preset?.label ?? c.placement.positionId,
-        size: c.rendered ? formatDimensions(c.rendered.widthCm, c.rendered.heightCm) : '—',
-        summary:
-          c.design.type === 'text'
-            ? `“${textLines(c.design.text).join(' / ')}” · ${findFont(c.design.fontId)?.label} · ${findThreadColor(c.design.threadColorId)?.label} thread`
-            : `Logo: ${c.design.originalFilename}`,
-        artworkRef: c.design.type === 'image' ? c.design.storageRef : null,
+        team: c.teamOrderId ? c.teamOrderId.slice(0, 8).toUpperCase() : null,
+        designs: c.layers.map((l) => ({
+          placement: getPreset(adapter, l.placement.positionId)?.label ?? l.placement.positionId,
+          size: l.rendered ? formatDimensions(l.rendered.widthCm, l.rendered.heightCm) : '—',
+          summary:
+            l.design.type === 'text'
+              ? `“${textLines(l.design.text).join(' / ')}” · ${findFont(l.design.fontId)?.label} · ${findThreadColor(l.design.threadColorId)?.label} thread`
+              : `Logo: ${l.design.originalFilename}${l.design.backgroundRemoved ? ' (background removed)' : ''}`,
+          artworkRef: l.design.type === 'image' ? l.design.storageRef : null,
+        })),
       };
     }),
   };
@@ -81,12 +84,9 @@ export default function Index() {
             <thead>
               <tr style={{ textAlign: 'left' }}>
                 <th>Customization ID</th>
-                <th>Design</th>
-                <th>Placement</th>
-                <th>Size</th>
+                <th>Designs</th>
                 <th>Variant</th>
                 <th>Order</th>
-                <th />
               </tr>
             </thead>
             <tbody>
@@ -95,9 +95,15 @@ export default function Index() {
                   <td style={{ fontFamily: 'monospace', padding: '8px 4px' }}>
                     {d.customizationId.slice(0, 8)}…
                   </td>
-                  <td style={{ padding: '8px 4px' }}>{d.summary}</td>
-                  <td style={{ padding: '8px 4px' }}>{d.placement}</td>
-                  <td style={{ padding: '8px 4px' }}>{d.size}</td>
+                  <td style={{ padding: '8px 4px' }}>
+                    {d.designs.map((x, i) => (
+                      <div key={i} style={{ marginBottom: 4 }}>
+                        <strong>{x.placement}</strong> ({x.size}) — {x.summary}{' '}
+                        {x.artworkRef ? <s-link href={`/app/artwork/${x.artworkRef}`}>Download</s-link> : null}
+                      </div>
+                    ))}
+                    {d.team ? <s-badge>Team {d.team}</s-badge> : null}
+                  </td>
                   <td style={{ padding: '8px 4px' }}>{d.variant}</td>
                   <td style={{ padding: '8px 4px' }}>
                     {d.order ? (
@@ -105,11 +111,6 @@ export default function Index() {
                     ) : (
                       <s-badge>In a cart</s-badge>
                     )}
-                  </td>
-                  <td style={{ padding: '8px 4px' }}>
-                    {d.artworkRef ? (
-                      <s-link href={`/app/artwork/${d.artworkRef}`}>Download artwork</s-link>
-                    ) : null}
                   </td>
                 </tr>
               ))}

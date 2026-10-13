@@ -4,7 +4,14 @@
  */
 import { render, type ComponentChildren } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
-import { LIMITS, getModelAdapter, type PlacementId } from '@embroidery/shared';
+import {
+  LIMITS,
+  feeCodeForVariantTitle,
+  getModelAdapter,
+  type PlacementId,
+  type PricingSettings,
+} from '@embroidery/shared';
+import { sharedRefFromUrl } from '../state/savedDesigns';
 import { DemoCartAdapter, ShopifyCartAdapter, normalizeRoot } from '@embroidery/shopify-cart';
 import styles from '../styles.css?inline';
 import {
@@ -31,7 +38,16 @@ export interface BlockData {
   display?: 'inline' | 'button';
   buttonLabel?: string;
   syncThemeVariant?: boolean;
+  /** Variants of the block's "Embroidery fee product" (prices come from Shopify, never the browser). */
+  feeVariants?: { title: string; price: number; id: string | number; available?: boolean }[] | null;
+  /** Preview-only prices ("Logo: 8" per line, store currency) used when no fee product is set. */
+  samplePrices?: string | null;
   settings?: {
+    theme?: string;
+    themeSwitcher?: boolean;
+    maxDesigns?: number;
+    teamOrders?: boolean;
+    sharing?: boolean;
     heading?: string;
     subtitle?: string;
     defaultText?: string;
@@ -63,6 +79,8 @@ function toSettings(data: BlockData): Partial<ConfiguratorSettings> {
     cartUrl: `${normalizeRoot(data.root)}cart`,
     afterAdd: s.afterAdd === 'cart' ? 'cart' : 'stay',
   };
+  if (s.theme === 'clean' || s.theme === 'sport' || s.theme === 'atelier') settings.theme = s.theme;
+  if (typeof s.themeSwitcher === 'boolean') settings.themeSwitcher = s.themeSwitcher;
   if (s.heading) settings.heading = s.heading;
   if (s.subtitle) settings.subtitle = s.subtitle;
   if (s.defaultText)
@@ -81,15 +99,47 @@ function toSettings(data: BlockData): Partial<ConfiguratorSettings> {
   if (fonts) settings.fontIds = fonts;
   if (s.maxUploadMb)
     settings.maxUploadBytes = Math.min(20, Math.max(1, s.maxUploadMb)) * 1024 * 1024;
+  if (typeof s.maxDesigns === 'number')
+    settings.maxDesigns = Math.max(1, Math.min(LIMITS.maxDesigns, s.maxDesigns));
+  if (typeof s.teamOrders === 'boolean') settings.teamOrders = s.teamOrders;
+  if (typeof s.sharing === 'boolean') settings.sharing = s.sharing;
   return settings;
+}
+
+/** Map fee-product variants to fee codes by title ("Logo", "Large size", "3D Puff"…). */
+export function toPricing(
+  variants: BlockData['feeVariants'],
+  samplePrices?: string | null,
+): PricingSettings {
+  const fees: PricingSettings['fees'] = {};
+  if (!variants?.length && samplePrices) {
+    // Display-only: variantId null → shown with a "not charged" note, never added to the cart.
+    for (const line of samplePrices.split(/\n|,/)) {
+      const m = line.match(/^\s*(.+?)\s*:\s*([0-9]+(?:[.,][0-9]{1,2})?)\s*$/);
+      const code = m ? feeCodeForVariantTitle(m[1]!) : null;
+      if (code)
+        fees[code] = {
+          price: Math.round(parseFloat(m![2]!.replace(',', '.')) * 100),
+          variantId: null,
+        };
+    }
+    return { fees };
+  }
+  for (const v of variants ?? []) {
+    const code = feeCodeForVariantTitle(v.title);
+    if (code && v.available !== false)
+      fees[code] = { price: Math.max(0, Number(v.price) || 0), variantId: String(v.id) };
+  }
+  return { fees };
 }
 
 /** Build configurator props for a block; without a product it runs as a labelled demo. */
 export async function buildProps(data: BlockData): Promise<ConfiguratorProps> {
   const adapter = getModelAdapter(data.modelId);
   const settings = toSettings(data);
+  const sharedDesignRef = sharedRefFromUrl();
   if (!data.product) {
-    const { DEMO_PRODUCT } = await import('./demoProduct');
+    const { DEMO_PRODUCT, DEMO_PRICING } = await import('./demoProduct');
     return {
       mode: 'demo',
       adapter,
@@ -97,6 +147,8 @@ export async function buildProps(data: BlockData): Promise<ConfiguratorProps> {
       product: DEMO_PRODUCT,
       cart: new DemoCartAdapter(),
       persistence: new DemoPersistence(),
+      pricing: DEMO_PRICING,
+      sharedDesignRef,
       settings: { ...settings, cartUrl: null },
     };
   }
@@ -108,6 +160,8 @@ export async function buildProps(data: BlockData): Promise<ConfiguratorProps> {
     initialVariantId: data.selectedVariantId ? String(data.selectedVariantId) : null,
     cart: new ShopifyCartAdapter({ root: data.root }),
     persistence: new FallbackPersistence(new AppProxyPersistence(data.proxyPath)),
+    pricing: toPricing(data.feeVariants, data.samplePrices),
+    sharedDesignRef,
     settings,
   };
 }
@@ -250,6 +304,7 @@ export interface CartEditRequest {
   modelUrl: string;
   currency: string;
   locale: string;
+  feeVariants?: BlockData['feeVariants'];
   reloadAfterSave?: boolean;
 }
 
@@ -283,8 +338,9 @@ export async function openCartEditor(req: CartEditRequest): Promise<void> {
     product: fromShopifyProduct(productJson, req.currency, req.locale),
     cart: new ShopifyCartAdapter({ root }),
     persistence,
+    pricing: toPricing(req.feeVariants),
+    settings: { cartUrl: `${root}cart`, teamOrders: false },
     edit,
-    settings: { cartUrl: `${root}cart` },
     onUpdated: () => {
       close();
       // Cart markup differs per theme; a reload is the theme-neutral way to show fresh lines.

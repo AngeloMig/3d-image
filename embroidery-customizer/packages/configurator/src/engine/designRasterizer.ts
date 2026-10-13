@@ -4,6 +4,7 @@ import {
   textLines,
   FONTS,
   type SizeCm,
+  type StitchStyle,
   type TextDesign,
 } from '@embroidery/shared';
 import { canvasFont } from './fonts';
@@ -118,8 +119,10 @@ export class DesignRasterizer {
     return { widthCm: m.widthCm, heightCm: m.heightCm };
   }
 
-  private prepare(widthCm: number, heightCm: number) {
-    const pad = Math.min(widthCm, heightCm) * DESIGN_PADDING + 0.15;
+  private prepare(widthCm: number, heightCm: number, style: StitchStyle = 'flat') {
+    // Patches extend past the design; puff throws a deeper shadow.
+    const extra = style === 'patch' ? 0.75 : style === 'puff' ? 0.2 : style === 'chenille' ? 0.15 : 0;
+    const pad = Math.min(widthCm, heightCm) * DESIGN_PADDING + 0.15 + extra;
     const canvasWidthCm = widthCm + pad * 2;
     const canvasHeightCm = heightCm + pad * 2;
     let pxPerCm = PX_PER_CM;
@@ -141,9 +144,11 @@ export class DesignRasterizer {
     const metrics = this.measureText(design);
     const font = findFont(design.fontId) ?? FONTS[0]!;
     const thread = findThreadColor(design.threadColorId)?.hex ?? '#111111';
+    const style = design.stitchStyle ?? 'flat';
     const { pad, pxPerCm, w, h, canvasWidthCm, canvasHeightCm } = this.prepare(
       finalWidthCm,
       finalHeightCm,
+      style,
     );
 
     const k = (finalWidthCm * pxPerCm) / Math.max(metrics.ref.width, 1);
@@ -168,7 +173,13 @@ export class DesignRasterizer {
       drawTrackedText(m, line.text, x, baseline, metrics.ref.spacingPx * k);
       baseline += REF_PX * LINE_ADVANCE * k;
     }
-    this.compose(thread, metrics.ref.capHeight * k, 1);
+    this.compose(thread, metrics.ref.capHeight * k, 1, style, {
+      x: pad * pxPerCm,
+      y: pad * pxPerCm,
+      w: finalWidthCm * pxPerCm,
+      h: finalHeightCm * pxPerCm,
+      pxPerCm,
+    });
     return {
       canvas: this.canvas,
       widthCm: finalWidthCm,
@@ -180,10 +191,16 @@ export class DesignRasterizer {
   }
 
   /** Render uploaded artwork at its final (fitted) size. */
-  renderImage(image: CanvasImageSource, finalWidthCm: number, finalHeightCm: number): RasterResult {
+  renderImage(
+    image: CanvasImageSource,
+    finalWidthCm: number,
+    finalHeightCm: number,
+    style: StitchStyle = 'flat',
+  ): RasterResult {
     const { pad, pxPerCm, w, h, canvasWidthCm, canvasHeightCm } = this.prepare(
       finalWidthCm,
       finalHeightCm,
+      style,
     );
     const m = ctx2d(this.mask);
     m.setTransform(1, 0, 0, 1, 0, 0);
@@ -196,7 +213,13 @@ export class DesignRasterizer {
       finalWidthCm * pxPerCm,
       finalHeightCm * pxPerCm,
     );
-    this.compose(null, Math.min(finalWidthCm, finalHeightCm) * pxPerCm * 0.2, 0.45);
+    this.compose(null, Math.min(finalWidthCm, finalHeightCm) * pxPerCm * 0.2, 0.45, style, {
+      x: pad * pxPerCm,
+      y: pad * pxPerCm,
+      w: finalWidthCm * pxPerCm,
+      h: finalHeightCm * pxPerCm,
+      pxPerCm,
+    });
     return {
       canvas: this.canvas,
       widthCm: finalWidthCm,
@@ -234,11 +257,35 @@ export class DesignRasterizer {
     return pattern;
   }
 
+  /** Deterministic speckle tile for chenille loops (same look on every render). */
+  private speckles(ctx: CanvasRenderingContext2D): CanvasPattern | null {
+    if (this.stripeCache.has('speckle')) return this.stripeCache.get('speckle') ?? null;
+    const tile = makeCanvas(48, 48);
+    const t = ctx2d(tile);
+    let seed = 7;
+    const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+    for (let i = 0; i < 520; i++) {
+      t.fillStyle = rnd() > 0.5 ? 'rgba(255,255,255,0.55)' : 'rgba(0,0,0,0.45)';
+      t.beginPath();
+      t.arc(rnd() * 48, rnd() * 48, 0.6 + rnd() * 1.3, 0, Math.PI * 2);
+      t.fill();
+    }
+    const pattern = ctx.createPattern(tile, 'repeat');
+    this.stripeCache.set('speckle', pattern);
+    return pattern;
+  }
+
   /**
-   * mask (white glyphs or artwork) → thread fill → satin stripes → raised shadow.
+   * mask (white glyphs or artwork) → thread fill → stitch texture → style finish → shadow.
    * `fill` null keeps the artwork's own colours.
    */
-  private compose(fill: string | null, featurePx: number, stripeStrength: number): void {
+  private compose(
+    fill: string | null,
+    featurePx: number,
+    stripeStrength: number,
+    style: StitchStyle,
+    ink: { x: number; y: number; w: number; h: number; pxPerCm: number },
+  ): void {
     const out = ctx2d(this.canvas);
     const { width: w, height: h } = this.canvas;
     out.setTransform(1, 0, 0, 1, 0, 0);
@@ -249,35 +296,146 @@ export class DesignRasterizer {
     const tinted = ctx2d(this.mask);
     if (fill) {
       tinted.globalCompositeOperation = 'source-in';
-      tinted.fillStyle = fill;
+      if (style === 'metallic') {
+        // Banded metallic gradient built from the thread colour.
+        const g = tinted.createLinearGradient(0, ink.y, 0, ink.y + ink.h);
+        g.addColorStop(0, mix(fill, '#ffffff', 0.65));
+        g.addColorStop(0.3, fill);
+        g.addColorStop(0.5, mix(fill, '#000000', 0.35));
+        g.addColorStop(0.68, mix(fill, '#ffffff', 0.55));
+        g.addColorStop(1, mix(fill, '#000000', 0.25));
+        tinted.fillStyle = g;
+      } else tinted.fillStyle = fill;
       tinted.fillRect(0, 0, w, h);
     }
-    // Satin texture + soft top light, clipped to the design.
     tinted.globalCompositeOperation = 'source-atop';
-    const pattern = this.stripes(tinted, Math.max(3, featurePx * 0.09));
-    if (pattern) {
-      tinted.globalAlpha = 0.28 * stripeStrength;
-      tinted.fillStyle = pattern;
-      tinted.fillRect(0, 0, w, h);
+    if (style === 'chenille') {
+      const speck = this.speckles(tinted);
+      if (speck) {
+        tinted.globalAlpha = 0.55;
+        tinted.fillStyle = speck;
+        tinted.fillRect(0, 0, w, h);
+      }
+    } else {
+      // Satin stitches (finer and brighter for metallic, bolder for puff).
+      const spacing = Math.max(3, featurePx * (style === 'metallic' ? 0.06 : style === 'puff' ? 0.12 : 0.09));
+      const pattern = this.stripes(tinted, spacing);
+      if (pattern) {
+        tinted.globalAlpha = (style === 'metallic' ? 0.4 : style === 'puff' ? 0.34 : 0.28) * stripeStrength;
+        tinted.fillStyle = pattern;
+        tinted.fillRect(0, 0, w, h);
+      }
     }
     tinted.globalAlpha = 1;
-    const sheen = tinted.createLinearGradient(0, 0, 0, h);
-    sheen.addColorStop(0, 'rgba(255,255,255,0.14)');
-    sheen.addColorStop(0.55, 'rgba(255,255,255,0)');
-    sheen.addColorStop(1, 'rgba(0,0,0,0.16)');
+    // Light from above: puff gets a strong rounded highlight, metallic a hard specular band.
+    const sheen = tinted.createLinearGradient(0, ink.y, 0, ink.y + ink.h);
+    if (style === 'puff') {
+      sheen.addColorStop(0, 'rgba(255,255,255,0.38)');
+      sheen.addColorStop(0.45, 'rgba(255,255,255,0.05)');
+      sheen.addColorStop(1, 'rgba(0,0,0,0.38)');
+    } else if (style === 'metallic' && !fill) {
+      sheen.addColorStop(0, 'rgba(255,255,255,0.45)');
+      sheen.addColorStop(0.35, 'rgba(255,255,255,0)');
+      sheen.addColorStop(0.6, 'rgba(255,255,255,0.3)');
+      sheen.addColorStop(1, 'rgba(0,0,0,0.2)');
+    } else {
+      sheen.addColorStop(0, 'rgba(255,255,255,0.14)');
+      sheen.addColorStop(0.55, 'rgba(255,255,255,0)');
+      sheen.addColorStop(1, 'rgba(0,0,0,0.16)');
+    }
     tinted.fillStyle = sheen;
     tinted.fillRect(0, 0, w, h);
     tinted.globalCompositeOperation = 'source-over';
 
-    // Raised thread: soft contact shadow underneath, then the stitched layer.
     const blur = Math.max(1, featurePx * 0.05);
-    out.shadowColor = 'rgba(0,0,0,0.42)';
-    out.shadowBlur = blur * 2;
+    if (style === 'patch') this.drawPatch(out, fill, ink);
+
+    if (style === 'chenille') {
+      // Fuzzy loops: a soft halo in the thread colour around the shape.
+      out.shadowColor = fill ? hexToRgba(fill, 0.85) : 'rgba(255,255,255,0.6)';
+      out.shadowBlur = Math.max(2, featurePx * 0.14);
+      out.drawImage(this.mask, 0, 0);
+    }
+    // Raised thread: contact shadow underneath, then the stitched layer.
+    const depth = style === 'puff' ? 2.6 : 1;
+    out.shadowColor = `rgba(0,0,0,${style === 'puff' ? 0.55 : 0.42})`;
+    out.shadowBlur = blur * 2 * depth;
     out.shadowOffsetX = 0;
-    out.shadowOffsetY = blur * 0.8;
+    out.shadowOffsetY = blur * 0.8 * depth;
     out.drawImage(this.mask, 0, 0);
     out.shadowColor = 'transparent';
     out.shadowBlur = 0;
     out.shadowOffsetY = 0;
   }
+
+  /** Twill patch with a merrowed (overlocked) border, sewn on behind the design. */
+  private drawPatch(
+    out: CanvasRenderingContext2D,
+    fill: string | null,
+    ink: { x: number; y: number; w: number; h: number; pxPerCm: number },
+  ): void {
+    const margin = 0.45 * ink.pxPerCm;
+    const x = ink.x - margin;
+    const y = ink.y - margin;
+    const pw = ink.w + margin * 2;
+    const ph = ink.h + margin * 2;
+    const r = Math.min(pw, ph) * 0.18;
+    const light = fill ? luminance(fill) > 0.45 : false;
+    const base = light ? '#25262b' : '#efe8d8';
+    out.save();
+    out.shadowColor = 'rgba(0,0,0,0.4)';
+    out.shadowBlur = ink.pxPerCm * 0.25;
+    out.shadowOffsetY = ink.pxPerCm * 0.08;
+    roundRect(out, x, y, pw, ph, r);
+    out.fillStyle = base;
+    out.fill();
+    out.restore();
+    // Twill weave.
+    out.save();
+    roundRect(out, x, y, pw, ph, r);
+    out.clip();
+    out.strokeStyle = light ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)';
+    out.lineWidth = Math.max(1, ink.pxPerCm * 0.05);
+    for (let d = -ph; d < pw + ph; d += ink.pxPerCm * 0.16) {
+      out.beginPath();
+      out.moveTo(x + d, y);
+      out.lineTo(x + d - ph, y + ph);
+      out.stroke();
+    }
+    out.restore();
+    // Merrowed edge: dense stitches around the border.
+    out.save();
+    roundRect(out, x, y, pw, ph, r);
+    out.strokeStyle = fill ?? '#3b3b40';
+    out.lineWidth = ink.pxPerCm * 0.22;
+    out.setLineDash([ink.pxPerCm * 0.05, ink.pxPerCm * 0.035]);
+    out.stroke();
+    out.restore();
+  }
+}
+
+function hexToRgb(hex: string): [number, number, number] {
+  const n = parseInt(hex.replace('#', ''), 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+function mix(a: string, b: string, t: number): string {
+  const x = hexToRgb(a);
+  const y = hexToRgb(b);
+  return `rgb(${x.map((v, i) => Math.round(v + (y[i]! - v) * t)).join(',')})`;
+}
+function hexToRgba(hex: string, alpha: number): string {
+  return `rgba(${hexToRgb(hex).join(',')},${alpha})`;
+}
+function luminance(hex: string): number {
+  const [r, g, b] = hexToRgb(hex);
+  return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+}
+function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number): void {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
 }

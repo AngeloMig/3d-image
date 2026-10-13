@@ -91,12 +91,15 @@ export function createEmbroideryService(db: PrismaClient, storage: ArtworkStorag
         requireStoredArtwork: true,
       });
       if (issues.length) throw new EmbroideryError(issues[0]!.message, 422);
-      let artworkRef: string | null = null;
-      if (config.design.type === 'image') {
-        artworkRef = config.design.storageRef;
-        const art = await db.artwork.findFirst({ where: { shop, storageRef: artworkRef! } });
+      // Every logo in the design must be artwork this shop actually stored.
+      const artworkRefs = config.layers.flatMap((l) =>
+        l.design.type === 'image' && l.design.storageRef ? [l.design.storageRef] : [],
+      );
+      for (const ref of artworkRefs) {
+        const art = await db.artwork.findFirst({ where: { shop, storageRef: ref } });
         if (!art) throw new EmbroideryError('Unknown artwork reference.', 422);
       }
+      const artworkRef = artworkRefs.length ? artworkRefs.join(',') : null;
       const configRef = `cfg_${token()}`;
       await db.embroideryConfiguration.create({
         data: {
@@ -144,9 +147,9 @@ export function createEmbroideryService(db: PrismaClient, storage: ArtworkStorag
           where: { id: row.id },
           data: { orderId: String(order.id), orderName: order.name ?? null, orderedAt },
         });
-        if (row.artworkRef)
+        for (const ref of row.artworkRef?.split(',') ?? [])
           await db.artwork.updateMany({
-            where: { shop, storageRef: row.artworkRef },
+            where: { shop, storageRef: ref },
             data: { orderedAt },
           });
         result.linked += 1;
@@ -169,7 +172,7 @@ export function createEmbroideryService(db: PrismaClient, storage: ArtworkStorag
       let artwork = 0;
       for (const a of stale) {
         const stillUsed = await db.embroideryConfiguration.count({
-          where: { shop: a.shop, artworkRef: a.storageRef },
+          where: { shop: a.shop, artworkRef: { contains: a.storageRef } },
         });
         if (stillUsed) continue;
         await storage.delete(a.storageKey);

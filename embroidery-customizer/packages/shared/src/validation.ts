@@ -1,10 +1,11 @@
-import { FONTS, LIMITS, THREAD_COLORS, findFont, findThreadColor } from './catalog';
-import { getPreset, getSurface, type ModelAdapter } from './models';
+import { FONTS, LIMITS, STITCH_STYLES, THREAD_COLORS, findFont, findThreadColor } from './catalog';
+import { getPreset, getSurface, positionsConflict, type ModelAdapter } from './models';
 import type {
   AllowedImageMime,
   EmbroideryConfiguration,
   ImageDesign,
   Placement,
+  PlacementId,
   TextDesign,
   ValidationIssue,
 } from './types';
@@ -155,12 +156,31 @@ export function validateConfiguration(
       field: 'quantity',
       message: `Quantity must be between 1 and ${LIMITS.maxQuantity}.`,
     });
-  issues.push(
-    ...(config.design.type === 'text'
-      ? validateTextDesign(config.design)
-      : validateImageDesign(config.design, { requireStored: opts.requireStoredArtwork ?? false })),
-  );
-  issues.push(...validatePlacement(adapter, config.placement));
+  if (config.layers.length === 0) issues.push({ field: 'layers', message: 'Add at least one design.' });
+  if (config.layers.length > LIMITS.maxDesigns)
+    issues.push({ field: 'layers', message: `Up to ${LIMITS.maxDesigns} designs per item.` });
+  const many = config.layers.length > 1;
+  const seen = new Set<string>();
+  config.layers.forEach((layer, i) => {
+    // Prefix messages so customers know which design needs attention.
+    const label = many ? `Design ${i + 1}: ` : '';
+    const layerIssues = [
+      ...(layer.design.type === 'text'
+        ? validateTextDesign(layer.design)
+        : validateImageDesign(layer.design, { requireStored: opts.requireStoredArtwork ?? false })),
+      ...validatePlacement(adapter, layer.placement),
+    ];
+    const clash = [...seen].find((other) => positionsConflict(adapter, other as PlacementId, layer.placement.positionId));
+    if (clash)
+      layerIssues.push({
+        field: 'positionId',
+        message: clash === layer.placement.positionId ? 'Two designs can’t use the same position.' : 'This position overlaps another design.',
+      });
+    seen.add(layer.placement.positionId);
+    if (layer.design.stitchStyle && !STITCH_STYLES.some((x) => x.id === layer.design.stitchStyle))
+      layerIssues.push({ field: 'stitchStyle', message: 'Choose one of the available embroidery styles.' });
+    issues.push(...layerIssues.map((x) => ({ field: x.field, message: label + x.message, layer: i })));
+  });
   return issues;
 }
 
