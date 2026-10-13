@@ -1,0 +1,19 @@
+{
+  "name": "@embroidery/configurator",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./shopify": "./src/shopify/entry.tsx",
+    "./demo-product": "./src/shopify/demoProduct.ts",
+    "./shopify-loader": "./src/shopify/loader.ts"
+  },
+  "types": "./src/index.ts",
+  "dependencies": {
+    "@embroidery/shared": "0.1.0",
+    "@embroidery/shopify-cart": "0.1.0",
+    "preact": "^10.29.8",
+    "three": "~0.186.1"
+  }
+}

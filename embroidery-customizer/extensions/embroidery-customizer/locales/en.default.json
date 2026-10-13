@@ -1,0 +1,7 @@
+{
+  "embroidery": {
+    "load_error": "The embroidery customizer couldn't load. Please refresh the page.",
+    "noscript": "Please enable JavaScript to personalize this product.",
+    "choose_product": "Embroidery customizer: choose a product in the block settings. Until then it runs in demo mode."
+  }
+}

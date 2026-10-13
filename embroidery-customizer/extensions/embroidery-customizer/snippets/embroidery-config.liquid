@@ -1,0 +1,70 @@
+{%- doc -%}
+  Shared JSON payload for the embroidery configurator.
+
+  @param {object} [p] - Product to customize (blank = demo mode)
+  @param {object} s - block.settings or section.settings
+{%- enddoc -%}
+{%- liquid
+  assign model_url = s.model_url | strip
+  if s.use_product_model and p != blank
+    for media in p.media
+      if media.media_type == 'model'
+        for source in media.sources
+          if source.format == 'glb'
+            assign model_url = source.url
+            break
+          endif
+        endfor
+        break
+      endif
+    endfor
+  endif
+  if model_url == blank
+    assign model_url = 'embroidery-tshirt.glb' | asset_url
+  endif
+
+  assign positions = ''
+  if s.pos_left_chest
+    assign positions = positions | append: 'left_chest,'
+  endif
+  if s.pos_center_chest
+    assign positions = positions | append: 'center_chest,'
+  endif
+  if s.pos_right_chest
+    assign positions = positions | append: 'right_chest,'
+  endif
+  if s.pos_upper_back
+    assign positions = positions | append: 'upper_back,'
+  endif
+  if s.pos_center_back
+    assign positions = positions | append: 'center_back,'
+  endif
+  assign positions = positions | split: ','
+  assign threads = s.thread_colors | remove: ' ' | split: ','
+-%}
+<script type="application/json" data-embroidery-config>
+  {
+    "product": {% if p != blank %}{{ p | json }}{% else %}null{% endif %},
+    "selectedVariantId": {% if p != blank %}{{ p.selected_or_first_available_variant.id | json }}{% else %}null{% endif %},
+    "currency": {{ cart.currency.iso_code | json }},
+    "locale": {{ request.locale.iso_code | json }},
+    "root": {{ routes.root_url | json }},
+    "modelUrl": {{ model_url | json }},
+    "modelId": {{ s.model_profile | default: 'tshirt-v1' | json }},
+    "proxyPath": {{ s.proxy_path | default: '/apps/embroidery' | json }},
+    "display": {{ s.display | default: 'inline' | json }},
+    "buttonLabel": {{ s.button_label | json }},
+    "syncThemeVariant": {{ s.sync_theme_variant | json }},
+    "settings": {
+      "heading": {{ s.heading | json }},
+      "subtitle": {{ s.subtitle | json }},
+      "defaultText": {{ s.default_text | json }},
+      "defaultPositionId": {{ s.default_position | json }},
+      "positionIds": {{ positions | json }},
+      "threadColorIds": {{ threads | json }},
+      "maxUploadMb": {{ s.max_upload_mb | default: 5 | json }},
+      "garmentColors": {{ s.garment_colors | json }},
+      "afterAdd": {{ s.after_add | default: 'stay' | json }}
+    }
+  }
+</script>

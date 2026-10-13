@@ -1,0 +1,26 @@
+{%- comment -%}
+  Embroidery details for Shopify packing slips.
+  Install: Settings → Shipping and delivery → Packing slip template → Edit.
+  Paste this INSIDE the `{% for line_item in line_items_in_shipment %}` loop, right after the
+  line item title/variant. Text only (packing slips don't load external images); staff look up
+  the original artwork in Apps → Embroidery Customizer using the Customization ID.
+{%- endcomment -%}
+{%- assign emb_keys = 'Embroidery Type|Embroidery Text|Artwork File|Font|Thread Color|Placement|Embroidery Size|Position Adjustment|Rotation|Customization ID' | split: '|' -%}
+{%- capture emb_rows -%}
+  {%- for property in line_item.properties -%}
+    {%- assign emb_name = property.name | default: property.first -%}
+    {%- assign emb_value = property.value | default: property.last -%}
+    {%- if emb_keys contains emb_name and emb_value != blank -%}
+      <tr>
+        <td style="padding: 1px 8px 1px 0; color: #555; white-space: nowrap; vertical-align: top;">{{ emb_name | escape }}</td>
+        <td style="padding: 1px 0; font-weight: 600;">{{ emb_value | escape }}</td>
+      </tr>
+    {%- endif -%}
+  {%- endfor -%}
+{%- endcapture -%}
+{%- if emb_rows != blank -%}
+  <div class="embroidery-details" style="margin: 6px 0 2px; padding: 6px 8px; border: 1px dashed #999; border-radius: 4px; font-size: 11px; line-height: 1.35;">
+    <div style="font-weight: 700; text-transform: uppercase; letter-spacing: .04em; margin-bottom: 3px;">Embroidery</div>
+    <table style="border-collapse: collapse;">{{ emb_rows }}</table>
+  </div>
+{%- endif -%}

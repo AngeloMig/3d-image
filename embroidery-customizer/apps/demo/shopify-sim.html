@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Shopify simulator — Embroidery customizer</title>
+    <style>
+      body {
+        margin: 0;
+        font-family:
+          ui-sans-serif,
+          -apple-system,
+          'Segoe UI',
+          Arial,
+          sans-serif;
+        color: #1f1d1a;
+        background: #fff;
+      }
+      .sim-banner {
+        background: #1f1d1a;
+        color: #fff;
+        padding: 8px 16px;
+        font-size: 13px;
+      }
+      .page-width {
+        max-width: 1280px;
+        margin: 0 auto;
+        padding: 24px 16px;
+      }
+      .theme-product {
+        display: grid;
+        gap: 12px;
+        padding-bottom: 16px;
+        border-bottom: 1px solid #ddd;
+      }
+      .theme-product select {
+        font: inherit;
+        padding: 6px;
+        max-width: 220px;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 14px;
+      }
+      td {
+        border-top: 1px solid #eee;
+        padding: 10px 6px;
+        vertical-align: top;
+      }
+      dl {
+        margin: 6px 0 0;
+      }
+      .product-option {
+        display: flex;
+        gap: 4px;
+      }
+      dt {
+        color: #666;
+      }
+      dd {
+        margin: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="sim-banner">
+      Local Shopify simulator — mock Ajax cart + app proxy (dev/test only)
+    </div>
+    <main class="page-width">
+      <section class="theme-product">
+        <h1>Classic Embroidered Tee</h1>
+        <form action="/cart/add" method="post">
+          <label
+            >Theme variant picker
+            <select name="id">
+              <option value="4100">S / Royal</option>
+              <option value="4113">M / Navy</option>
+              <option value="4122">L / Black</option>
+            </select>
+          </label>
+        </form>
+      </section>
+
+      <!-- Mirrors blocks/embroidery-customizer.liquid output -->
+      <div class="embroidery-customizer-block" data-embroidery-root data-testid="block">
+        <script type="application/json" data-embroidery-config>
+          {
+            "product": {
+              "id": 7001,
+              "title": "Classic Embroidered Tee",
+              "options": ["Size", "Color"],
+              "variants": [
+                {
+                  "id": 4100,
+                  "title": "S / Royal",
+                  "options": ["S", "Royal"],
+                  "available": true,
+                  "price": 3400
+                },
+                {
+                  "id": 4101,
+                  "title": "S / White",
+                  "options": ["S", "White"],
+                  "available": true,
+                  "price": 3400
+                },
+                {
+                  "id": 4102,
+                  "title": "S / Black",
+                  "options": ["S", "Black"],
+                  "available": true,
+                  "price": 3400
+                },
+                {
+                  "id": 4103,
+                  "title": "S / Navy",
+                  "options": ["S", "Navy"],
+                  "available": true,
+                  "price": 3400
+                },
+                {
+                  "id": 4110,
+                  "title": "M / Royal",
+                  "options": ["M", "Royal"],
+                  "available": true,
+                  "price": 3400
+                },
+                {
+                  "id": 4111,
+                  "title": "M / White",
+                  "options": ["M", "White"],
+                  "available": true,
+                  "price": 3400
+                },
+                {
+                  "id": 4112,
+                  "title": "M / Black",
+                  "options": ["M", "Black"],
+                  "available": true,
+                  "price": 3400
+                },
+                {
+                  "id": 4113,
+                  "title": "M / Navy",
+                  "options": ["M", "Navy"],
+                  "available": true,
+                  "price": 3400
+                },
+                {
+                  "id": 4120,
+                  "title": "L / Royal",
+                  "options": ["L", "Royal"],
+                  "available": true,
+                  "price": 3400
+                },
+                {
+                  "id": 4121,
+                  "title": "L / White",
+                  "options": ["L", "White"],
+                  "available": true,
+                  "price": 3400
+                },
+                {
+                  "id": 4122,
+                  "title": "L / Black",
+                  "options": ["L", "Black"],
+                  "available": true,
+                  "price": 3400
+                },
+                {
+                  "id": 4123,
+                  "title": "L / Navy",
+                  "options": ["L", "Navy"],
+                  "available": true,
+                  "price": 3400
+                }
+              ]
+            },
+            "selectedVariantId": 4100,
+            "currency": "USD",
+            "locale": "en",
+            "root": "/",
+            "modelUrl": "./models/tshirt.glb",
+            "modelId": "tshirt-v1",
+            "proxyPath": "/apps/embroidery",
+            "display": "inline",
+            "syncThemeVariant": true,
+            "settings": {
+              "heading": "Customize Your Embroidery",
+              "positionIds": [
+                "left_chest",
+                "center_chest",
+                "right_chest",
+                "upper_back",
+                "center_back"
+              ],
+              "threadColorIds": ["white", "black", "navy", "red", "gold"],
+              "garmentColors": "Royal: original\nWhite: #f1f1ee\nBlack: #232325\nNavy: #24304f",
+              "afterAdd": "stay"
+            }
+          }
+        </script>
+        <p data-embroidery-fallback hidden>The embroidery customizer couldn't load.</p>
+      </div>
+
+      <section>
+        <h2>Cart (<span data-cart-count>0</span>)</h2>
+        <table>
+          <tbody data-cart-items></tbody>
+        </table>
+      </section>
+    </main>
+    <!-- Mirrors blocks/cart-edit.liquid (app embed) -->
+    <div
+      hidden
+      data-embroidery-cart-edit
+      data-root="/"
+      data-proxy-path="/apps/embroidery"
+      data-model-url="./models/tshirt.glb"
+      data-currency="USD"
+      data-locale="en"
+      data-label="Edit embroidery"
+    ></div>
+    <script type="module" src="./src/shopify-sim/main.ts"></script>
+  </body>
+</html>

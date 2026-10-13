@@ -1,0 +1,16 @@
+node_modules/
+dist/
+.react-router/
+build/
+coverage/
+playwright-report/
+test-results/
+# local environment files (keep the example)
+.env
+.env.*
+!.env.example
+*.sqlite
+prisma/*.db*
+storage/
+.shopify/
+.DS_Store

@@ -1,0 +1,46 @@
+# Shopify app configuration. Run `npm run config:link` (shopify app config link) to connect this
+# project to an app in your Partner Dashboard — that fills in client_id and URLs. No secrets here.
+client_id = ""
+name = "Embroidery Customizer"
+application_url = "https://example.com"
+embedded = true
+
+[build]
+automatically_update_urls_on_dev = true
+include_config_on_deploy = true
+
+[access_scopes]
+# read_orders: needed for the orders/create webhook that retains artwork for ordered items.
+scopes = "read_orders"
+
+[auth]
+redirect_urls = ["https://example.com/auth/callback"]
+
+[app_proxy]
+# Storefront → https://{shop}/apps/embroidery/* → {application_url}/proxy/*
+url = "https://example.com/proxy"
+subpath = "embroidery"
+prefix = "apps"
+
+[webhooks]
+api_version = "2026-10"
+
+  [[webhooks.subscriptions]]
+  uri = "/webhooks/app/uninstalled"
+  topics = ["app/uninstalled"]
+
+  [[webhooks.subscriptions]]
+  topics = ["app/scopes_update"]
+  uri = "/webhooks/app/scopes_update"
+
+  [[webhooks.subscriptions]]
+  topics = ["orders/create"]
+  uri = "/webhooks/orders/create"
+
+  # Mandatory compliance topics (public apps)
+  [[webhooks.subscriptions]]
+  compliance_topics = ["customers/data_request", "customers/redact", "shop/redact"]
+  uri = "/webhooks/compliance"
+
+[pos]
+embedded = false

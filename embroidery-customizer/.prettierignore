@@ -1,0 +1,6 @@
+dist
+build
+node_modules
+extensions/*/assets/*.js
+package-lock.json
+*.glb

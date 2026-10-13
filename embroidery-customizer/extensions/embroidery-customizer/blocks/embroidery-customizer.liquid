@@ -1,0 +1,86 @@
+{%- comment -%}
+  Product-page app block (also works on the homepage or any template: choose a product in the
+  block settings). The 3D customizer is lazy-loaded when the block scrolls into view.
+{%- endcomment -%}
+{%- liquid
+  assign p = block.settings.product
+  if p == blank
+    assign p = product
+  endif
+-%}
+<div
+  class="embroidery-customizer-block"
+  data-embroidery-root
+  data-module-src="{{ 'embroidery-configurator.js' | asset_url }}"
+  {{ block.shopify_attributes }}
+>
+  {% render 'embroidery-config', p: p, s: block.settings %}
+  <div class="embroidery-customizer-block__placeholder" aria-hidden="true"></div>
+  <p data-embroidery-fallback hidden>{{ 'embroidery.load_error' | t }}</p>
+  <noscript>{{ 'embroidery.noscript' | t }}</noscript>
+  {%- if request.design_mode and p == blank -%}
+    <p class="embroidery-customizer-block__editor-note">{{ 'embroidery.choose_product' | t }}</p>
+  {%- endif -%}
+</div>
+<style>
+  .embroidery-customizer-block { display: block; margin: 1.5rem 0; }
+  .embroidery-customizer-block:not([data-embroidery-state='ready']) .embroidery-customizer-block__placeholder {
+    min-height: {% if block.settings.display == 'button' %}52px{% else %}min(80vh, 640px){% endif %};
+    border-radius: 14px;
+    background: linear-gradient(100deg, #f1eee7 30%, #f8f6f1 50%, #f1eee7 70%) 0 0 / 200% 100%;
+    animation: embroidery-shimmer 1.4s linear infinite;
+  }
+  .embroidery-customizer-block[data-embroidery-state='ready'] .embroidery-customizer-block__placeholder { display: none; }
+  .embroidery-customizer-block__editor-note { padding: .75rem 1rem; border: 1px dashed currentColor; border-radius: 8px; }
+  @keyframes embroidery-shimmer { to { background-position: -200% 0; } }
+  @media (prefers-reduced-motion: reduce) { .embroidery-customizer-block__placeholder { animation: none; } }
+</style>
+
+{% schema %}
+{
+  "name": "Embroidery customizer",
+  "target": "section",
+  "javascript": "embroidery-loader.js",
+  "settings": [
+    { "type": "product", "id": "product", "label": "Product", "info": "Leave empty on product pages to use the current product. Required on the homepage and other pages." },
+    { "type": "select", "id": "display", "label": "Display", "default": "inline", "options": [
+      { "value": "inline", "label": "Inline (full customizer on the page)" },
+      { "value": "button", "label": "Button that opens a full-screen customizer" }
+    ], "info": "Use the button option inside narrow product-info columns." },
+    { "type": "text", "id": "button_label", "label": "Button label", "default": "Personalize with embroidery" },
+    { "type": "text", "id": "heading", "label": "Heading", "default": "Customize Your Embroidery" },
+    { "type": "text", "id": "subtitle", "label": "Subtitle", "default": "Add a name, initials or your logo — see it stitched onto the garment in 3D before you order." },
+    { "type": "text", "id": "default_text", "label": "Default embroidery text", "default": "YOUR NAME" },
+    { "type": "header", "content": "Embroidery positions" },
+    { "type": "checkbox", "id": "pos_left_chest", "label": "Left chest", "default": true },
+    { "type": "checkbox", "id": "pos_center_chest", "label": "Center chest", "default": true },
+    { "type": "checkbox", "id": "pos_right_chest", "label": "Right chest", "default": true },
+    { "type": "checkbox", "id": "pos_upper_back", "label": "Upper back", "default": true },
+    { "type": "checkbox", "id": "pos_center_back", "label": "Center back", "default": true },
+    { "type": "select", "id": "default_position", "label": "Default position", "default": "left_chest", "options": [
+      { "value": "left_chest", "label": "Left chest" },
+      { "value": "center_chest", "label": "Center chest" },
+      { "value": "right_chest", "label": "Right chest" },
+      { "value": "upper_back", "label": "Upper back" },
+      { "value": "center_back", "label": "Center back" }
+    ] },
+    { "type": "header", "content": "Thread and garment colours" },
+    { "type": "text", "id": "thread_colors", "label": "Thread colours offered", "default": "white,black,navy,red,gold,silver,forest,royal,burgundy,blush", "info": "Comma-separated ids: white, black, navy, red, gold, silver, forest, royal, burgundy, blush. The first one is the default." },
+    { "type": "textarea", "id": "garment_colors", "label": "Garment colour map", "default": "Royal: original\nWhite: #f1f1ee\nBlack: #232325\nNavy: #24304f\nBeige: #d9c8a9", "info": "One per line: <colour option value>: <hex>. Use 'original' to keep the 3D model's own texture colour." },
+    { "type": "header", "content": "3D model" },
+    { "type": "checkbox", "id": "use_product_model", "label": "Use the product's 3D model media (GLB) when available", "default": true },
+    { "type": "text", "id": "model_url", "label": "Model URL override", "info": "Optional GLB URL (e.g. uploaded to Content → Files). Empty = bundled sample T-shirt." },
+    { "type": "select", "id": "model_profile", "label": "Model calibration profile", "default": "tshirt-v1", "options": [
+      { "value": "tshirt-v1", "label": "Classic T-shirt (sample model)" }
+    ], "info": "Embroidery zones are calibrated per model. New garments need a new profile." },
+    { "type": "header", "content": "Behaviour" },
+    { "type": "range", "id": "max_upload_mb", "label": "Max logo upload size", "min": 1, "max": 10, "step": 1, "unit": "MB", "default": 5 },
+    { "type": "select", "id": "after_add", "label": "After adding to cart", "default": "stay", "options": [
+      { "value": "stay", "label": "Stay on page and confirm" },
+      { "value": "cart", "label": "Go to the cart" }
+    ] },
+    { "type": "checkbox", "id": "sync_theme_variant", "label": "Follow the theme's variant picker", "default": true },
+    { "type": "text", "id": "proxy_path", "label": "App proxy path", "default": "/apps/embroidery", "info": "Must match the app proxy configured for the app." }
+  ]
+}
+{% endschema %}

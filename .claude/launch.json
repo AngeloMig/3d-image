@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "embroidery-demo",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "embroidery-customizer", "run", "demo"],
+      "port": 5173
+    }
+  ]
+}

@@ -1,0 +1,38 @@
+{%- comment -%}
+  App embed: adds an "Edit embroidery" button to customized cart lines (cart page and drawers).
+  Theme-neutral — it finds each line by its visible "Customization ID" property. Themes can
+  also place <span data-embroidery-edit-slot="{{ item.key }}"></span> inside the line markup.
+{%- endcomment -%}
+<div
+  hidden
+  data-embroidery-cart-edit
+  data-module-src="{{ 'embroidery-configurator.js' | asset_url }}"
+  data-root="{{ routes.root_url }}"
+  data-proxy-path="{{ block.settings.proxy_path | default: '/apps/embroidery' }}"
+  data-model-url="{{ block.settings.model_url | default: 'embroidery-tshirt.glb' | asset_url }}"
+  data-currency="{{ cart.currency.iso_code }}"
+  data-locale="{{ request.locale.iso_code }}"
+  data-label="{{ block.settings.label | escape }}"
+></div>
+<style>
+  .embroidery-edit-button {
+    display: inline-flex; align-items: center; gap: .35rem; margin: .4rem 0; padding: .35rem .8rem;
+    font: inherit; font-size: .85em; font-weight: 600; line-height: 1.2; cursor: pointer;
+    color: inherit; background: transparent; border: 1px solid currentColor; border-radius: 999px;
+  }
+  .embroidery-edit-button:hover { background: rgba(0,0,0,.05); }
+  .embroidery-edit-button:disabled { opacity: .6; cursor: progress; }
+</style>
+
+{% schema %}
+{
+  "name": "Embroidery: edit in cart",
+  "target": "body",
+  "javascript": "embroidery-loader.js",
+  "settings": [
+    { "type": "text", "id": "label", "label": "Button label", "default": "Edit embroidery" },
+    { "type": "text", "id": "proxy_path", "label": "App proxy path", "default": "/apps/embroidery" },
+    { "type": "text", "id": "model_url", "label": "Model asset name", "info": "Leave empty to use the bundled sample T-shirt." }
+  ]
+}
+{% endschema %}

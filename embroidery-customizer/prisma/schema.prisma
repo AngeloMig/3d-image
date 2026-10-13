@@ -1,0 +1,73 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// Note that some adapters may set a maximum length for the String type by default, please ensure your strings are long
+// enough when changing adapters.
+// See https://www.prisma.io/docs/orm/reference/prisma-schema-reference#string for more information
+datasource db {
+  provider = "sqlite"
+  url      = "file:dev.sqlite"
+}
+
+model Session {
+  id            String    @id
+  shop          String
+  state         String
+  isOnline      Boolean   @default(false)
+  scope         String?
+  expires       DateTime?
+  accessToken   String
+  userId        BigInt?
+  firstName     String?
+  lastName      String?
+  email         String?
+  accountOwner  Boolean   @default(false)
+  locale        String?
+  collaborator  Boolean?  @default(false)
+  emailVerified Boolean?  @default(false)
+  refreshToken        String?
+  refreshTokenExpires DateTime?
+}
+
+/// Customer-uploaded artwork. Bytes live in object storage (local disk in dev, S3/R2 in prod).
+model Artwork {
+  id         String    @id @default(cuid())
+  shop       String
+  /// Opaque public reference used in cart properties ("art_…"). Never the storage key.
+  storageRef String    @unique
+  /// Object key in the storage bucket (shop-scoped, unguessable).
+  storageKey String
+  filename   String
+  mimeType   String
+  byteSize   Int
+  sha256     String
+  createdAt  DateTime  @default(now())
+  /// Set once a paid/placed order references this artwork — never auto-deleted after that.
+  orderedAt  DateTime?
+
+  @@index([shop, createdAt])
+}
+
+/// Full customization saved before add-to-cart; referenced by `_Embroidery Config Ref`.
+model EmbroideryConfiguration {
+  id              String    @id @default(cuid())
+  shop            String
+  configRef       String    @unique
+  customizationId String
+  schemaVersion   Int
+  json            String
+  artworkRef      String?
+  productId       String
+  variantId       String
+  createdAt       DateTime  @default(now())
+  orderId         String?
+  orderName       String?
+  orderedAt       DateTime?
+
+  @@index([shop, customizationId])
+  @@index([shop, createdAt])
+}

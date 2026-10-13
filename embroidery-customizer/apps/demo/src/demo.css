@@ -1,0 +1,245 @@
+/* Demo storefront chrome only — the configurator itself is styled inside its shadow root. */
+:root {
+  color-scheme: light;
+  --demo-ink: #1f1d1a;
+  --demo-muted: #6c675f;
+  --demo-line: #e5e1d8;
+  --demo-bg: #fbfaf7;
+}
+* {
+  box-sizing: border-box;
+}
+html {
+  -webkit-text-size-adjust: 100%;
+}
+body {
+  margin: 0;
+  background: var(--demo-bg);
+  color: var(--demo-ink);
+  font-family:
+    ui-sans-serif,
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    'Helvetica Neue',
+    Arial,
+    sans-serif;
+  overflow-x: hidden;
+}
+.demo-bar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 12px clamp(16px, 4vw, 40px);
+  background: rgba(251, 250, 247, 0.92);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--demo-line);
+}
+.demo-bar__brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 600;
+  min-width: 0;
+}
+.demo-bar__mark {
+  color: #9c7a45;
+}
+.demo-bar__tag {
+  font-weight: 400;
+  font-size: 12.5px;
+  color: var(--demo-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+@media (max-width: 560px) {
+  .demo-bar__tag {
+    display: none;
+  }
+}
+.demo-bar__cart {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+  border: 1px solid var(--demo-line);
+  background: #fff;
+  border-radius: 999px;
+  padding: 8px 8px 8px 14px;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.demo-bar__count {
+  display: inline-grid;
+  place-items: center;
+  min-width: 24px;
+  height: 24px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--demo-ink);
+  color: #fff;
+  font-size: 12px;
+}
+.demo-main {
+  padding: clamp(16px, 3vw, 36px) clamp(16px, 4vw, 40px) 64px;
+}
+:focus-visible {
+  outline: 2px solid #9c7a45;
+  outline-offset: 2px;
+}
+
+.demo-drawer {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: rgba(20, 17, 12, 0.38);
+  display: flex;
+  justify-content: flex-end;
+}
+.demo-drawer__panel {
+  width: min(460px, 100vw);
+  height: 100%;
+  background: #fff;
+  overflow-y: auto;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  outline: none;
+  box-shadow: -12px 0 40px rgba(0, 0, 0, 0.12);
+}
+.demo-drawer__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.demo-drawer__head h2 {
+  margin: 0;
+  font-size: 20px;
+}
+.demo-icon-btn {
+  border: 0;
+  background: none;
+  font-size: 26px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 4px 8px;
+}
+.demo-drawer__note {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--demo-muted);
+  background: #f6f3ec;
+  padding: 10px 12px;
+  border-radius: 10px;
+}
+.demo-drawer__note code {
+  font-size: 11.5px;
+}
+.demo-empty {
+  color: var(--demo-muted);
+}
+.demo-error {
+  color: #a3312b;
+  margin: 0;
+  font-size: 14px;
+}
+.demo-lines {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.demo-line {
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr);
+  gap: 12px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--demo-line);
+}
+.demo-line__img {
+  width: 76px;
+  height: 76px;
+  border-radius: 10px;
+  object-fit: cover;
+  background: #f1eee7;
+  display: block;
+}
+.demo-line__top {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 14.5px;
+}
+.demo-line__variant {
+  margin: 2px 0 8px;
+  font-size: 13px;
+  color: var(--demo-muted);
+}
+.demo-props {
+  margin: 0;
+  display: grid;
+  gap: 2px;
+  font-size: 12.5px;
+}
+.demo-props div {
+  display: grid;
+  grid-template-columns: 118px minmax(0, 1fr);
+  gap: 8px;
+}
+.demo-props dt {
+  color: var(--demo-muted);
+}
+.demo-props dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.demo-props code {
+  font-size: 11px;
+}
+.demo-hidden-props {
+  margin-top: 6px;
+  font-size: 12.5px;
+}
+.demo-hidden-props summary {
+  cursor: pointer;
+  color: var(--demo-muted);
+}
+.demo-line__actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+.demo-btn {
+  border: 1px solid var(--demo-ink);
+  background: var(--demo-ink);
+  color: #fff;
+  border-radius: 999px;
+  padding: 7px 14px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.demo-btn--ghost {
+  background: #fff;
+  color: var(--demo-ink);
+  border-color: var(--demo-line);
+}
+.demo-drawer__foot {
+  margin-top: auto;
+  display: flex;
+  justify-content: space-between;
+  padding-top: 12px;
+  border-top: 1px solid var(--demo-line);
+  font-size: 15px;
+}
