@@ -121,7 +121,7 @@ export const DEFAULT_SETTINGS: ConfiguratorSettings = {
   defaultText: 'YOUR NAME',
   defaultPositionId: 'left_chest',
   defaultThreadColorId: 'red',
-  defaultGarmentColor: 'White',
+  defaultGarmentColor: 'Black',
   fontIds: FONTS.map((f) => f.id),
   threadColorIds: THREAD_COLORS.map((c) => c.id),
   positionIds: ['left_chest', 'center_chest', 'right_chest', 'upper_back', 'center_back'],
@@ -570,6 +570,8 @@ export function Configurator(props: ConfiguratorProps) {
           widthCm: x.raster.canvasWidthCm,
           heightCm: x.raster.canvasHeightCm,
           rotationDeg: l.placement.rotationDeg,
+          height: x.raster.height,
+          relief: x.raster.relief,
         },
       ];
     });

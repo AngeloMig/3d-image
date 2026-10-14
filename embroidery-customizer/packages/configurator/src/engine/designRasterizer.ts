@@ -16,6 +16,15 @@ const MAX_TEXTURE_SIDE = 1024;
 export const DESIGN_PADDING = 0.08;
 
 const REF_PX = 100;
+
+/** Bump strength per technique (how far the stitching stands off the fabric). */
+const RELIEF: Record<StitchStyle, number> = {
+  flat: 1,
+  metallic: 0.9,
+  puff: 2.6,
+  chenille: 1.6,
+  patch: 1.2,
+};
 const LINE_ADVANCE = 1.18;
 
 interface TextMetricsCm extends SizeCm {
@@ -26,6 +35,13 @@ interface TextMetricsCm extends SizeCm {
 
 export interface RasterResult {
   canvas: HTMLCanvasElement;
+  /**
+   * Stitch relief (grey = height, black = fabric): rounded satin columns / tatami rows / puff
+   * foam / chenille loops. Used as the decal's bump map so real lighting rakes across stitches.
+   */
+  height: HTMLCanvasElement;
+  /** Bump strength for this style (puff and chenille stand proud of the fabric). */
+  relief: number;
   /** Design ink size in cm (excludes padding). */
   widthCm: number;
   heightCm: number;
@@ -80,6 +96,8 @@ function trackedWidth(ctx: CanvasRenderingContext2D, text: string, spacingPx: nu
 export class DesignRasterizer {
   private readonly scratch = makeCanvas();
   private readonly mask = makeCanvas();
+  private readonly tmp = makeCanvas();
+  readonly height = makeCanvas();
   private stripeCache = new Map<string, CanvasPattern | null>();
   private version = 0;
   readonly canvas = makeCanvas();
@@ -131,7 +149,7 @@ export class DesignRasterizer {
     if (longest > MAX_TEXTURE_SIDE) pxPerCm *= MAX_TEXTURE_SIDE / longest;
     const w = Math.max(8, Math.round(canvasWidthCm * pxPerCm));
     const h = Math.max(8, Math.round(canvasHeightCm * pxPerCm));
-    for (const c of [this.canvas, this.mask]) {
+    for (const c of [this.canvas, this.mask, this.height, this.tmp]) {
       if (c.width !== w || c.height !== h) {
         c.width = w;
         c.height = h;
@@ -174,15 +192,19 @@ export class DesignRasterizer {
       drawTrackedText(m, line.text, x, baseline, metrics.ref.spacingPx * k);
       baseline += REF_PX * LINE_ADVANCE * k;
     }
-    this.compose(thread, metrics.ref.capHeight * k, 1, style, {
+    const ink = {
       x: pad * pxPerCm,
       y: pad * pxPerCm,
       w: finalWidthCm * pxPerCm,
       h: finalHeightCm * pxPerCm,
       pxPerCm,
-    });
+    };
+    this.compose(thread, metrics.ref.capHeight * k, 1, style, ink);
+    this.buildHeight(style, 'satin', metrics.ref.capHeight * k, ink);
     return {
       canvas: this.canvas,
+      height: this.height,
+      relief: RELIEF[style],
       widthCm: finalWidthCm,
       heightCm: finalHeightCm,
       canvasWidthCm,
@@ -214,15 +236,21 @@ export class DesignRasterizer {
       finalWidthCm * pxPerCm,
       finalHeightCm * pxPerCm,
     );
-    this.compose(null, Math.min(finalWidthCm, finalHeightCm) * pxPerCm * 0.2, 0.45, style, {
+    const ink = {
       x: pad * pxPerCm,
       y: pad * pxPerCm,
       w: finalWidthCm * pxPerCm,
       h: finalHeightCm * pxPerCm,
       pxPerCm,
-    });
+    };
+    const feature = Math.min(finalWidthCm, finalHeightCm) * pxPerCm * 0.2;
+    this.compose(null, feature, 0.45, style, ink);
+    // Large artwork areas are digitized as tatami fill, not satin.
+    this.buildHeight(style, 'tatami', feature, ink);
     return {
       canvas: this.canvas,
+      height: this.height,
+      relief: RELIEF[style],
       widthCm: finalWidthCm,
       heightCm: finalHeightCm,
       canvasWidthCm,
@@ -325,8 +353,9 @@ export class DesignRasterizer {
       );
       const pattern = this.stripes(tinted, spacing);
       if (pattern) {
+        // Light touch only: the stitch relief (height map) does the real shading in 3D.
         tinted.globalAlpha =
-          (style === 'metallic' ? 0.4 : style === 'puff' ? 0.34 : 0.28) * stripeStrength;
+          (style === 'metallic' ? 0.22 : style === 'puff' ? 0.14 : 0.12) * stripeStrength;
         tinted.fillStyle = pattern;
         tinted.fillRect(0, 0, w, h);
       }
@@ -371,6 +400,181 @@ export class DesignRasterizer {
     out.shadowColor = 'transparent';
     out.shadowBlur = 0;
     out.shadowOffsetY = 0;
+  }
+
+  /**
+   * Height map of the stitching (white = high). The shape's alpha (this.mask after compose)
+   * gets a rounded bevel — thread columns are domed, edges sink into the fabric — then the
+   * stitch structure is carved in: satin (long diagonal threads) for lettering, tatami (rows
+   * of short offset stitches) for artwork, foam dome for puff, random loops for chenille,
+   * twill + a ridged merrow edge for patches.
+   */
+  private buildHeight(
+    style: StitchStyle,
+    kind: 'satin' | 'tatami',
+    featurePx: number,
+    ink: { x: number; y: number; w: number; h: number; pxPerCm: number },
+  ): void {
+    const { width: w, height: h } = this.height;
+    const H = ctx2d(this.height);
+    H.setTransform(1, 0, 0, 1, 0, 0);
+    H.globalCompositeOperation = 'source-over';
+    H.globalAlpha = 1;
+    H.fillStyle = '#000';
+    H.fillRect(0, 0, w, h);
+    const px = ink.pxPerCm;
+
+    if (style === 'patch') this.patchHeight(H, ink);
+
+    // 1. Domed columns: a blurred copy of the shape, kept inside the shape.
+    const bevel =
+      style === 'puff'
+        ? Math.max(3, featurePx * 0.24)
+        : style === 'chenille'
+          ? Math.max(2, featurePx * 0.1)
+          : Math.max(1.5, Math.min(featurePx * 0.07, px * 0.12));
+    const T = ctx2d(this.tmp);
+    T.setTransform(1, 0, 0, 1, 0, 0);
+    T.globalCompositeOperation = 'source-over';
+    T.globalAlpha = 1;
+    T.clearRect(0, 0, w, h);
+    // Blur via an off-canvas shadow (works in every browser, unlike ctx.filter).
+    T.shadowColor = '#fff';
+    T.shadowBlur = bevel;
+    T.shadowOffsetX = w * 2;
+    T.drawImage(this.mask, -w * 2, 0);
+    T.shadowColor = 'transparent';
+    T.shadowBlur = 0;
+    T.shadowOffsetX = 0;
+    T.globalCompositeOperation = 'destination-in';
+    T.drawImage(this.mask, 0, 0);
+    // Grey level = dome height; the shape's own alpha keeps edges soft.
+    T.globalCompositeOperation = 'source-in';
+    T.fillStyle = style === 'puff' ? '#fff' : '#e8e8e8';
+    T.fillRect(0, 0, w, h);
+    T.globalCompositeOperation = 'source-over';
+    H.drawImage(this.tmp, 0, 0);
+
+    // 2. Stitch structure, carved into the dome (darker = groove between threads).
+    T.clearRect(0, 0, w, h);
+    const s = Math.max(2.5, px * (style === 'metallic' ? 0.055 : style === 'puff' ? 0.1 : 0.07));
+    T.lineCap = 'butt';
+    if (style === 'chenille') {
+      // Loops: overlapping soft bumps of varying height.
+      let seed = 11;
+      const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+      const r = Math.max(1.6, px * 0.06);
+      const n = Math.min(9000, Math.round((w * h) / (r * r * 1.6)));
+      for (let i = 0; i < n; i++) {
+        const v = Math.round(rnd() * 120);
+        T.fillStyle = `rgba(${v},${v},${v},0.5)`;
+        T.beginPath();
+        T.arc(rnd() * w, rnd() * h, r * (0.6 + rnd() * 0.7), 0, Math.PI * 2);
+        T.fill();
+      }
+    } else if (kind === 'satin') {
+      // Satin: long parallel threads across the column, here at a classic 40° slant.
+      T.strokeStyle = 'rgba(0,0,0,0.42)';
+      T.lineWidth = s * 0.34;
+      const slope = Math.tan((40 * Math.PI) / 180);
+      for (let x = -h / slope; x < w + h; x += s) {
+        T.beginPath();
+        T.moveTo(x, h);
+        T.lineTo(x + h / slope, 0);
+        T.stroke();
+      }
+    } else {
+      // Tatami fill, per colour region like a digitizer would: each colour gets its own stitch
+      // angle, rows of short stitches with offset needle points, and a groove where colours meet.
+      this.tatamiHeight(T, s);
+    }
+    T.globalCompositeOperation = 'destination-in';
+    T.drawImage(this.mask, 0, 0);
+    T.globalCompositeOperation = 'source-over';
+    H.globalCompositeOperation = style === 'chenille' ? 'source-over' : 'multiply';
+    H.drawImage(this.tmp, 0, 0);
+    H.globalCompositeOperation = 'source-over';
+  }
+
+  /** Writes the tatami stitch structure for artwork into `T` (grey, alpha = artwork). */
+  private tatamiHeight(T: CanvasRenderingContext2D, s: number): void {
+    const { width: w, height: h } = this.tmp;
+    const src = ctx2d(this.mask).getImageData(0, 0, w, h).data;
+    const out = T.createImageData(w, h);
+    const d = out.data;
+    const row = s * 1.15;
+    const stitch = s * 4;
+    const ANGLES = [0, Math.PI / 4, Math.PI / 2, (3 * Math.PI) / 4];
+    // Colour region id per pixel (coarse buckets so anti-aliasing doesn't form regions).
+    const region = new Int32Array(w * h).fill(-1);
+    for (let i = 0, p = 0; i < w * h; i++, p += 4) {
+      if (src[p + 3]! < 60) continue;
+      region[i] = ((src[p]! >> 6) << 4) | ((src[p + 1]! >> 6) << 2) | (src[p + 2]! >> 6);
+    }
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const i = y * w + x;
+        const id = region[i]!;
+        if (id < 0) continue;
+        const a = ANGLES[(id * 7) % 4]!;
+        const ca = Math.cos(a);
+        const sa = Math.sin(a);
+        const across = -x * sa + y * ca; // distance across rows
+        const along = x * ca + y * sa; // distance along a row
+        const r = Math.floor(across / row);
+        const f = across / row - r; // 0..1 within a row
+        // Rounded thread row, a dip between rows, and needle points offset row to row.
+        let v = 0.55 + 0.45 * Math.sin(Math.PI * f);
+        const k = (((along + (r % 3) * (stitch / 3)) % stitch) + stitch) % stitch;
+        if (k < 1.2) v *= 0.55;
+        // Groove where a different colour (or the edge) starts.
+        const edge =
+          (x > 0 && region[i - 1] !== id) ||
+          (x < w - 1 && region[i + 1] !== id) ||
+          (y > 0 && region[i - w] !== id) ||
+          (y < h - 1 && region[i + w] !== id);
+        if (edge) v *= 0.45;
+        const g = Math.round(255 * v);
+        const p = i * 4;
+        d[p] = d[p + 1] = d[p + 2] = g;
+        d[p + 3] = 255;
+      }
+    }
+    T.putImageData(out, 0, 0);
+  }
+
+  /** Patch backing: twill weave at mid height and a raised merrowed (overlocked) border. */
+  private patchHeight(
+    H: CanvasRenderingContext2D,
+    ink: { x: number; y: number; w: number; h: number; pxPerCm: number },
+  ): void {
+    const margin = 0.45 * ink.pxPerCm;
+    const x = ink.x - margin;
+    const y = ink.y - margin;
+    const pw = ink.w + margin * 2;
+    const ph = ink.h + margin * 2;
+    const r = Math.min(pw, ph) * 0.18;
+    H.save();
+    roundRect(H, x, y, pw, ph, r);
+    H.fillStyle = '#5a5a5a';
+    H.fill();
+    H.clip();
+    H.strokeStyle = 'rgba(0,0,0,0.35)';
+    H.lineWidth = Math.max(1, ink.pxPerCm * 0.05);
+    for (let d = -ph; d < pw + ph; d += ink.pxPerCm * 0.16) {
+      H.beginPath();
+      H.moveTo(x + d, y);
+      H.lineTo(x + d - ph, y + ph);
+      H.stroke();
+    }
+    H.restore();
+    H.save();
+    roundRect(H, x, y, pw, ph, r);
+    H.strokeStyle = '#9a9a9a';
+    H.lineWidth = ink.pxPerCm * 0.22;
+    H.setLineDash([ink.pxPerCm * 0.05, ink.pxPerCm * 0.035]);
+    H.stroke();
+    H.restore();
   }
 
   /** Twill patch with a merrowed (overlocked) border, sewn on behind the design. */

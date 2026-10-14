@@ -72,7 +72,7 @@ test('team order: one design, a name and size per person, added as separate line
   await page.getByTestId('open-cart').click();
   const lines = page.getByTestId('cart-line');
   await expect(lines).toHaveCount(3);
-  await expect(lines.nth(1)).toContainText('L / White'); // default garment colour
+  await expect(lines.nth(1)).toContainText('L / Black'); // default garment colour
   for (const [i, n] of ['ALEX', 'SAM', 'JORDAN'].entries()) {
     await expect(lines.nth(i)).toContainText(n);
     await expect(lines.nth(i)).toContainText(`(${i + 1} of 3)`);

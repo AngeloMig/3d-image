@@ -7,7 +7,7 @@ import {
   DoubleSide,
   Euler,
   HemisphereLight,
-  LinearSRGBColorSpace,
+  NoColorSpace,
   Mesh,
   MeshStandardMaterial,
   NeutralToneMapping,
@@ -47,6 +47,10 @@ export interface DecalInput {
   widthCm: number;
   heightCm: number;
   rotationDeg: number;
+  /** Stitch height map (same size as `canvas`) → bump map, so lighting shows the stitches. */
+  height?: HTMLCanvasElement;
+  /** Bump strength (1 = flat satin). */
+  relief?: number;
 }
 
 export interface ViewerCallbacks {
@@ -66,12 +70,15 @@ export interface GarmentInfo {
 }
 
 const TINT_UNIFORMS = Symbol('tint');
+/** Base bump strength for stitch relief (scaled per technique by DecalInput.relief). */
+const BUMP_SCALE = 3;
 
 interface DecalSlot {
   input: DecalInput;
   mesh: Mesh | null;
   material: MeshStandardMaterial;
   texture: CanvasTexture;
+  heightTexture: CanvasTexture | null;
   key: string;
   version: number;
 }
@@ -189,11 +196,9 @@ export class GarmentViewer {
   private bounds = new Box3();
   private worldPerCm = 0.01;
   private homeDistance = 2;
-  private normalMap: Texture | null = null;
 
   /** One decal per design layer. */
   private decals = new Map<string, DecalSlot>();
-  private decalNormalMap: Texture | null = null;
 
   private frame = 0;
   private tween: { from: Spherical; to: Spherical; start: number; duration: number } | null = null;
@@ -311,7 +316,6 @@ export class GarmentViewer {
         }
         mat.side = DoubleSide;
         mat.roughness *= this.adapter.fabricRoughnessScale; // shader clamps the product to ≤ 1
-        if (mat.normalMap && !this.normalMap) this.normalMap = mat.normalMap;
         const analysis = mat.map
           ? analyseBaseColor(mesh, mat.map)
           : {
@@ -428,6 +432,22 @@ export class GarmentViewer {
           slot.texture.userData.h = img.height;
         }
         slot.texture.needsUpdate = true;
+        if (input.height) {
+          if (!slot.heightTexture) {
+            slot.heightTexture = this.heightTexture(input.height);
+            slot.material.bumpMap = slot.heightTexture;
+            slot.material.needsUpdate = true;
+          }
+          const ht = slot.heightTexture;
+          if (ht.image !== input.height) ht.image = input.height;
+          if (ht.userData.w !== input.height.width || ht.userData.h !== input.height.height) {
+            ht.dispose();
+            ht.userData.w = input.height.width;
+            ht.userData.h = input.height.height;
+          }
+          ht.needsUpdate = true;
+        }
+        slot.material.bumpScale = BUMP_SCALE * (input.relief ?? 1);
         slot.version = input.version;
       }
       const key = [
@@ -460,12 +480,7 @@ export class GarmentViewer {
     texture.userData.w = input.canvas.width;
     texture.userData.h = input.canvas.height;
 
-    if (this.normalMap && !this.decalNormalMap) {
-      this.decalNormalMap = this.normalMap.clone();
-      this.decalNormalMap.channel = 1; // sample with the garment's own UVs (decal attribute `uv1`)
-      this.decalNormalMap.colorSpace = LinearSRGBColorSpace;
-      this.decalNormalMap.needsUpdate = true;
-    }
+    const heightTexture = input.height ? this.heightTexture(input.height) : null;
     const material = new MeshStandardMaterial({
       map: texture,
       transparent: true,
@@ -474,13 +489,30 @@ export class GarmentViewer {
       polygonOffset: true,
       polygonOffsetFactor: -4,
       polygonOffsetUnits: -4,
-      roughness: 0.52,
+      // Thread is matte: a glossy finish mirrored the studio light as a white haze that turned
+      // coloured thread pastel (red read as pink on dark garments). A little self-colour from
+      // the same texture keeps thread colours true under any garment colour.
+      roughness: 0.8,
+      envMapIntensity: 0.5,
+      emissive: 0xffffff,
+      emissiveMap: texture,
+      emissiveIntensity: 0.32,
       metalness: 0,
       side: DoubleSide,
-      normalMap: this.decalNormalMap,
+      // The stitches themselves (domed satin columns, tatami rows, puff foam) as real relief.
+      bumpMap: heightTexture,
+      bumpScale: BUMP_SCALE * (input.relief ?? 1),
     });
-    if (this.decalNormalMap) material.normalScale.set(0.6, 0.6);
-    return { input, mesh: null, material, texture, key: '', version: -1 };
+    return { input, mesh: null, material, texture, heightTexture, key: '', version: -1 };
+  }
+
+  private heightTexture(canvas: HTMLCanvasElement): CanvasTexture {
+    const t = new CanvasTexture(canvas);
+    t.colorSpace = NoColorSpace; // data, not colour
+    t.anisotropy = Math.min(8, this.renderer.capabilities.getMaxAnisotropy());
+    t.userData.w = canvas.width;
+    t.userData.h = canvas.height;
+    return t;
   }
 
   private disposeSlot(id: string, slot: DecalSlot): void {
@@ -490,6 +522,7 @@ export class GarmentViewer {
     }
     slot.material.dispose();
     slot.texture.dispose();
+    slot.heightTexture?.dispose();
     this.decals.delete(id);
   }
 
@@ -874,7 +907,6 @@ export class GarmentViewer {
     this.controls.dispose();
     if (this.model) this.model.traverse((o) => this.disposeObject(o));
     for (const [id, slot] of [...this.decals]) this.disposeSlot(id, slot);
-    this.decalNormalMap?.dispose();
     this.scene.environment?.dispose();
     this.pmrem.dispose();
     this.renderer.dispose();
