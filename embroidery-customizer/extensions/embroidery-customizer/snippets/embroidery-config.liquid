@@ -45,7 +45,19 @@
 -%}
 <script type="application/json" data-embroidery-config>
   {
-    "product": {% if p != blank %}{{ p | json }}{% else %}null{% endif %},
+    "product": {%- if p != blank -%}
+      {
+        "id": {{ p.id | json }},
+        "title": {{ p.title | json }},
+        "handle": {{ p.handle | json }},
+        "options": {{ p.options | json }},
+        "variants": [
+          {%- for v in p.variants -%}
+            {"id": {{ v.id | json }}, "title": {{ v.title | json }}, "options": {{ v.options | json }}, "available": {{ v.available | json }}, "price": {{ v.price | json }}}{% unless forloop.last %},{% endunless %}
+          {%- endfor -%}
+        ]
+      }
+    {%- else -%}null{%- endif -%},
     "selectedVariantId": {% if p != blank %}{{ p.selected_or_first_available_variant.id | json }}{% else %}null{% endif %},
     "currency": {{ cart.currency.iso_code | json }},
     "locale": {{ request.locale.iso_code | json }},

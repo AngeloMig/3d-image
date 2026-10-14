@@ -12,6 +12,8 @@
     "embroidery_customizer": {
       "type": "embroidery-customizer",
       "settings": {
+        "product": "custom-embroidered-t-shirt",
+        "fee_product": "embroidery-fee",
         "display": "inline",
         "heading": "Make it yours.",
         "default_text": "YOUR NAME",
