@@ -3,8 +3,14 @@ export type {
   ConfiguratorProps,
   ConfiguratorSettings,
   EditRequest,
+  GarmentCarry,
 } from './components/Configurator';
-export { mountConfigurator, type MountHandle } from './mount';
+export {
+  GarmentConfigurator,
+  type GarmentConfiguratorProps,
+  type GarmentOption,
+} from './components/GarmentConfigurator';
+export { mountConfigurator, type MountHandle, type MountProps } from './mount';
 export { GarmentViewer } from './engine/garmentViewer';
 export { DesignRasterizer } from './engine/designRasterizer';
 export { buildDecalGeometry } from './engine/decalGeometry';

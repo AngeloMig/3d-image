@@ -28,6 +28,22 @@ interface Props {
 
 const cm = (v: number) => `${v > 0 ? '+' : ''}${v.toFixed(1)} cm`;
 
+/**
+ * "Center Chest: not available on polos…  Left Sleeve and Right Sleeve: coming soon…".
+ * Positions with a garment-specific reason show it; uncalibrated ones are "coming soon".
+ */
+function unavailableNotes(list: ModelAdapter['placements']): string {
+  const groups = new Map<string, string[]>();
+  for (const x of list) {
+    const reason =
+      x.unavailableReason && !/not calibrated/i.test(x.unavailableReason)
+        ? x.unavailableReason
+        : 'coming soon for this garment.';
+    groups.set(reason, [...(groups.get(reason) ?? []), x.label]);
+  }
+  return [...groups].map(([reason, labels]) => `${labels.join(' and ')}: ${reason}`).join(' ');
+}
+
 export function PlacementStep(p: Props) {
   const preset = p.adapter.placements.find((x) => x.id === p.placement.positionId);
   // Positions this garment can't take at all (e.g. uncalibrated sleeves) collapse into one note.
@@ -65,7 +81,7 @@ export function PlacementStep(p: Props) {
       />
       {unavailable.length ? (
         <p class="emb-field__hint emb-placement-note" data-testid="unavailable-positions">
-          {unavailable.map((x) => x.label).join(' and ')}: coming soon for this garment.
+          {unavailableNotes(unavailable)}
         </p>
       ) : null}
       {preset && p.resolved ? (

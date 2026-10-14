@@ -81,7 +81,16 @@ export type EditorAction =
     }
   | { type: 'applyTemplate'; layers: EditorLayer[] }
   | { type: 'reset'; state: EditorState }
-  | { type: 'load'; config: EmbroideryConfiguration; editing: EditingLine | null; asNew?: boolean }
+  | {
+      type: 'load';
+      config: EmbroideryConfiguration;
+      editing: EditingLine | null;
+      asNew?: boolean;
+      /** Keep the current product (garment switch): only the designs are carried over. */
+      keepProduct?: boolean;
+      /** Positions this shop offers (designs on others are moved). */
+      allowed?: PlacementId[];
+    }
   | { type: 'committed' };
 
 /* ------------------------------------------------------------------ products */
@@ -286,6 +295,36 @@ function fromConfigLayer(layer: DesignLayer, adapter: ModelAdapter): EditorLayer
   };
 }
 
+/**
+ * Keeps designs on positions this garment offers: a design on an unavailable or already-taken
+ * spot (e.g. Center Chest on a polo) moves to the first free position, or is dropped if none.
+ */
+export function relocateLayers(
+  adapter: ModelAdapter,
+  layers: EditorLayer[],
+  allowed?: PlacementId[],
+): EditorLayer[] {
+  const offered = availablePlacements(adapter, allowed).map((p) => p.id);
+  const out: EditorLayer[] = [];
+  for (const l of layers) {
+    const clash = (id: PlacementId) =>
+      out.some((o) => positionsConflict(adapter, o.placement.positionId, id));
+    if (offered.includes(l.placement.positionId) && !clash(l.placement.positionId)) {
+      out.push(l);
+      continue;
+    }
+    const target = offered.find((id) => !clash(id));
+    if (!target) continue;
+    const preset = getPreset(adapter, target)!;
+    out.push({
+      ...l,
+      placement: defaultPlacement(adapter, target),
+      text: { ...l.text, sizeCm: Math.min(l.text.sizeCm, preset.maxHeightCm) },
+    });
+  }
+  return out;
+}
+
 export function editorReducer(adapter: ModelAdapter) {
   return (state: EditorState, action: EditorAction): EditorState => {
     switch (action.type) {
@@ -437,17 +476,20 @@ export function editorReducer(adapter: ModelAdapter) {
         return { ...action.state, editing: state.editing };
       case 'load': {
         const c = action.config;
-        const layers = c.layers.map((l) => fromConfigLayer(l, adapter));
+        const layers = relocateLayers(
+          adapter,
+          c.layers.map((l) => fromConfigLayer(l, adapter)),
+          action.allowed,
+        );
+        if (!layers.length) return state;
         return {
-          step: 0,
+          step: action.keepProduct ? state.step : 0,
           // "asNew" (shared/saved designs) starts a fresh customization so it becomes its own cart line.
           configurationId: action.asNew ? createId() : c.configurationId,
           createdAt: action.asNew ? new Date().toISOString() : c.createdAt,
-          product: {
-            ...c.product,
-            modelId: state.product.modelId,
-            modelUrl: state.product.modelUrl,
-          },
+          product: action.keepProduct
+            ? state.product
+            : { ...c.product, modelId: state.product.modelId, modelUrl: state.product.modelUrl },
           layers,
           activeLayerId: layers[0]!.id,
           editing: action.editing,

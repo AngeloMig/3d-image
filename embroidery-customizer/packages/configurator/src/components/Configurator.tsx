@@ -157,6 +157,20 @@ export interface ConfiguratorProps {
   onUpdated?: (line: CartLine) => void;
   onCancelEdit?: () => void;
   onViewCart?: () => void;
+  /** Garments offered in this customizer (see GarmentConfigurator). */
+  garments?: { id: string; label: string }[];
+  garmentId?: string;
+  /** Switch garment, carrying the current designs (and uploaded files) over. */
+  onGarmentChange?: (id: string, carry: GarmentCarry) => void;
+  /** Designs carried over from the previous garment. */
+  carry?: GarmentCarry | null;
+}
+
+/** What survives a garment switch: the designs, option choices and uploaded logo files. */
+export interface GarmentCarry {
+  design: EmbroideryConfiguration;
+  options: Record<string, string>;
+  files: Map<string, File>;
 }
 
 interface Toast {
@@ -295,7 +309,9 @@ export function Configurator(props: ConfiguratorProps) {
   const rasterizers = useRef(new Map<string, DesignRasterizer>());
   const layoutCache = useRef(new Map<string, { sig: string; value: LayerLayout }>());
   /** Original upload per object URL, plus the original for logos whose background was removed. */
-  const files = useRef(new Map<string, File>());
+  const files = useRef(new Map<string, File>(props.carry?.files ?? []));
+  /** Object URLs handed to the next garment on a switch (must not be revoked on unmount). */
+  const handedOver = useRef(new Set<string>());
   const originals = useRef(
     new Map<string, { file: File; url: string; width: number; height: number }>(),
   );
@@ -410,11 +426,25 @@ export function Configurator(props: ConfiguratorProps) {
 
   useEffect(
     () => () => {
-      files.current.forEach((_, url) => URL.revokeObjectURL(url));
-      originals.current.forEach((o) => URL.revokeObjectURL(o.url));
+      files.current.forEach((_, url) => !handedOver.current.has(url) && URL.revokeObjectURL(url));
+      originals.current.forEach(
+        (o) => !handedOver.current.has(o.url) && URL.revokeObjectURL(o.url),
+      );
     },
     [],
   );
+
+  /* ---------------- designs carried over from another garment ---------------- */
+  useEffect(() => {
+    if (!props.carry) return;
+    dispatch({
+      type: 'load',
+      config: props.carry.design,
+      editing: null,
+      keepProduct: true,
+      allowed: settings.positionIds,
+    });
+  }, []);
 
   /* ---------------- designs → bitmaps → resolved placements ---------------- */
   const artworkUrls = state.layers
@@ -1201,6 +1231,24 @@ export function Configurator(props: ConfiguratorProps) {
         }}
       />
     ) : null;
+  const switchGarment = (id: string) => {
+    if (!props.onGarmentChange || id === props.garmentId) return;
+    const carried = new Map<string, File>();
+    for (const l of state.layers) {
+      const url = l.image?.previewUrl;
+      const file = url ? files.current.get(url) : undefined;
+      if (url && file) {
+        carried.set(url, file);
+        handedOver.current.add(url);
+      }
+    }
+    props.onGarmentChange(id, {
+      design: buildConfiguration(state, renderedMap),
+      options: state.product.options,
+      files: carried,
+    });
+  };
+
   const applyTemplate = (template: DesignTemplate, values: Record<string, string>) => {
     const layers = templateLayers(adapter, template, values, {
       allowed: settings.positionIds,
@@ -1370,6 +1418,9 @@ export function Configurator(props: ConfiguratorProps) {
                   onOption={(name, value) =>
                     dispatch({ type: 'selectOption', name, value, product })
                   }
+                  garments={state.editing ? undefined : props.garments}
+                  garmentId={props.garmentId}
+                  onGarment={switchGarment}
                 />
                 {settings.sharing && saved.length ? (
                   <div class="emb-saved" data-testid="saved-designs">

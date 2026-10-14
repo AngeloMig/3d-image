@@ -120,7 +120,10 @@ export function validatePlacement(adapter: ModelAdapter, placement: Placement): 
   if (!preset.available || !surface?.available)
     issues.push({
       field: 'positionId',
-      message: preset.unavailableReason ?? `${preset.label} is not available for this garment.`,
+      message:
+        preset.unavailableReason && /not calibrated/i.test(preset.unavailableReason)
+          ? preset.unavailableReason
+          : `${preset.label} isn’t available on this garment${preset.unavailableReason ? `: ${preset.unavailableReason}` : '.'}`,
     });
   if (placement.surfaceId !== preset.surfaceId)
     issues.push({ field: 'surfaceId', message: 'Placement surface does not match the position.' });
@@ -156,7 +159,8 @@ export function validateConfiguration(
       field: 'quantity',
       message: `Quantity must be between 1 and ${LIMITS.maxQuantity}.`,
     });
-  if (config.layers.length === 0) issues.push({ field: 'layers', message: 'Add at least one design.' });
+  if (config.layers.length === 0)
+    issues.push({ field: 'layers', message: 'Add at least one design.' });
   if (config.layers.length > LIMITS.maxDesigns)
     issues.push({ field: 'layers', message: `Up to ${LIMITS.maxDesigns} designs per item.` });
   const many = config.layers.length > 1;
@@ -170,16 +174,26 @@ export function validateConfiguration(
         : validateImageDesign(layer.design, { requireStored: opts.requireStoredArtwork ?? false })),
       ...validatePlacement(adapter, layer.placement),
     ];
-    const clash = [...seen].find((other) => positionsConflict(adapter, other as PlacementId, layer.placement.positionId));
+    const clash = [...seen].find((other) =>
+      positionsConflict(adapter, other as PlacementId, layer.placement.positionId),
+    );
     if (clash)
       layerIssues.push({
         field: 'positionId',
-        message: clash === layer.placement.positionId ? 'Two designs can’t use the same position.' : 'This position overlaps another design.',
+        message:
+          clash === layer.placement.positionId
+            ? 'Two designs can’t use the same position.'
+            : 'This position overlaps another design.',
       });
     seen.add(layer.placement.positionId);
     if (layer.design.stitchStyle && !STITCH_STYLES.some((x) => x.id === layer.design.stitchStyle))
-      layerIssues.push({ field: 'stitchStyle', message: 'Choose one of the available embroidery styles.' });
-    issues.push(...layerIssues.map((x) => ({ field: x.field, message: label + x.message, layer: i })));
+      layerIssues.push({
+        field: 'stitchStyle',
+        message: 'Choose one of the available embroidery styles.',
+      });
+    issues.push(
+      ...layerIssues.map((x) => ({ field: x.field, message: label + x.message, layer: i })),
+    );
   });
   return issues;
 }

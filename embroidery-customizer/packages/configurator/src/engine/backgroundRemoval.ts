@@ -17,7 +17,11 @@ const dist = (data: Uint8ClampedArray, i: number, c: [number, number, number]) =
   Math.hypot(data[i]! - c[0], data[i + 1]! - c[1], data[i + 2]! - c[2]);
 
 /** Median colour of the opaque border pixels. */
-function borderColor(data: Uint8ClampedArray, w: number, h: number): { color: [number, number, number]; transparent: number; total: number } {
+function borderColor(
+  data: Uint8ClampedArray,
+  w: number,
+  h: number,
+): { color: [number, number, number]; transparent: number; total: number } {
   const r: number[] = [];
   const g: number[] = [];
   const b: number[] = [];
@@ -47,9 +51,15 @@ function borderColor(data: Uint8ClampedArray, w: number, h: number): { color: [n
  * In-place on RGBA data. `tolerance` 0..100 maps to an RGB distance threshold.
  * Pixels just outside the threshold next to removed ones get partial alpha (anti-aliased edge).
  */
-export function floodRemoveBackground(data: Uint8ClampedArray, w: number, h: number, tolerance = 30): FloodResult {
+export function floodRemoveBackground(
+  data: Uint8ClampedArray,
+  w: number,
+  h: number,
+  tolerance = 30,
+): FloodResult {
   const { color, transparent, total } = borderColor(data, w, h);
-  if (transparent / Math.max(1, total) > 0.6) return { removed: 0, background: color, alreadyTransparent: true };
+  if (transparent / Math.max(1, total) > 0.6)
+    return { removed: 0, background: color, alreadyTransparent: true };
 
   const threshold = 8 + (tolerance / 100) * 140;
   const soft = threshold * 1.6;
@@ -98,7 +108,8 @@ export function floodRemoveBackground(data: Uint8ClampedArray, w: number, h: num
       (y < h - 1 && state[p + w] === 1);
     if (nearBg) {
       const d = dist(data, i, color);
-      if (d < soft) data[i + 3] = Math.round(data[i + 3]! * Math.max(0, (d - threshold) / (soft - threshold)));
+      if (d < soft)
+        data[i + 3] = Math.round(data[i + 3]! * Math.max(0, (d - threshold) / (soft - threshold)));
     }
   }
   return { removed: removed / (w * h), background: color, alreadyTransparent: false };
@@ -111,7 +122,10 @@ export interface BackgroundRemovalOutput extends FloodResult {
 }
 
 /** Decoded image → PNG blob with the background removed (max 2000px on the long side). */
-export async function removeBackground(image: CanvasImageSource & { width: number; height: number }, tolerance = 30): Promise<BackgroundRemovalOutput> {
+export async function removeBackground(
+  image: CanvasImageSource & { width: number; height: number },
+  tolerance = 30,
+): Promise<BackgroundRemovalOutput> {
   const iw = (image as HTMLImageElement).naturalWidth || image.width;
   const ih = (image as HTMLImageElement).naturalHeight || image.height;
   const scale = Math.min(1, 2000 / Math.max(iw, ih));
@@ -127,7 +141,10 @@ export async function removeBackground(image: CanvasImageSource & { width: numbe
   const result = floodRemoveBackground(pixels.data, w, h, tolerance);
   ctx.putImageData(pixels, 0, 0);
   const blob = await new Promise<Blob>((resolve, reject) =>
-    canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Could not encode PNG.'))), 'image/png'),
+    canvas.toBlob(
+      (b) => (b ? resolve(b) : reject(new Error('Could not encode PNG.'))),
+      'image/png',
+    ),
   );
   return { ...result, blob, width: w, height: h };
 }

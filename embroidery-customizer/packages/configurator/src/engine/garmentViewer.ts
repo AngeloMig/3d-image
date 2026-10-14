@@ -1,5 +1,6 @@
 import {
   Box3,
+  Matrix3,
   CanvasTexture,
   Color,
   DirectionalLight,
@@ -29,7 +30,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 import type { ModelAdapter, NormalizedPoint, SurfaceConfig } from '@embroidery/shared';
-import { buildDecalGeometry } from './decalGeometry';
+import { buildDecalGeometry, mergeDecalGeometries } from './decalGeometry';
 
 export type ViewName = 'home' | 'front' | 'back';
 export type Facing = 'front' | 'back' | 'side';
@@ -83,7 +84,7 @@ interface TintUniforms {
 function installTint(material: MeshStandardMaterial, refLum: number): TintUniforms {
   const uniforms: TintUniforms = {
     uEmbTint: { value: new Color(1, 1, 1) },
-    uEmbRefLum: { value: Math.max(0.02, refLum) },
+    uEmbRefLum: { value: refLum },
     uEmbTintMix: { value: 0 },
   };
   material.onBeforeCompile = (shader) => {
@@ -98,7 +99,9 @@ function installTint(material: MeshStandardMaterial, refLum: number): TintUnifor
         `#ifdef USE_MAP
   vec4 sampledDiffuseColor = texture2D( map, vMapUv );
   float embLum = dot( sampledDiffuseColor.rgb, vec3( 0.2126, 0.7152, 0.0722 ) );
-  float embDetail = embLum / uEmbRefLum;
+  // Near-black fabric has no usable luminance detail to carry over (dividing by ~0 would keep
+  // it black whatever the colour), so it takes a flat tint; the normal map keeps the weave.
+  float embDetail = uEmbRefLum < 0.04 ? 1.0 : embLum / uEmbRefLum;
   // Body fabric: re-colour while keeping the authored shading (detail ratio around 1).
   vec3 embTinted = uEmbTint * min( embDetail, 1.15 );
   // Much brighter texels are authored trim / contrast stitching (ringer sleeves, V-neck,
@@ -106,10 +109,15 @@ function installTint(material: MeshStandardMaterial, refLum: number): TintUnifor
   float embBody = 1.0 - smoothstep( 1.7, 2.8, embDetail );
   sampledDiffuseColor.rgb = mix( sampledDiffuseColor.rgb, embTinted, uEmbTintMix * embBody );
   diffuseColor *= sampledDiffuseColor;
+#else
+  // Untextured panels (plain colour factor, e.g. some CLO sleeves/back panels) take the same tint.
+  float embLum = dot( diffuseColor.rgb, vec3( 0.2126, 0.7152, 0.0722 ) );
+  float embDetail = uEmbRefLum < 0.04 ? 1.0 : embLum / uEmbRefLum;
+  diffuseColor.rgb = mix( diffuseColor.rgb, uEmbTint * min( embDetail, 1.15 ), uEmbTintMix );
 #endif`,
       );
   };
-  material.customProgramCacheKey = () => 'embroidery-tint-v1';
+  material.customProgramCacheKey = () => 'embroidery-tint-v3';
   (material as unknown as Record<symbol, TintUniforms>)[TINT_UNIFORMS] = uniforms;
   material.needsUpdate = true;
   return uniforms;
@@ -300,7 +308,13 @@ export class GarmentViewer {
         mat.side = DoubleSide;
         mat.roughness *= this.adapter.fabricRoughnessScale; // shader clamps the product to ≤ 1
         if (mat.normalMap && !this.normalMap) this.normalMap = mat.normalMap;
-        const analysis = analyseBaseColor(mesh, mat.map);
+        const analysis = mat.map
+          ? analyseBaseColor(mesh, mat.map)
+          : {
+              // Untextured: the colour factor is the whole base colour (already linear).
+              lum: 0.2126 * mat.color.r + 0.7152 * mat.color.g + 0.0722 * mat.color.b,
+              hex: null,
+            };
         originalColorHex ??= analysis.hex;
         this.tints.push(installTint(mat, analysis.lum));
       }
@@ -482,6 +496,29 @@ export class GarmentViewer {
   }
 
   /** Cast along the surface's facing axis to find the outermost garment point. */
+  /**
+   * The first garment surface the camera would see at `p`, with the orientation of its vertex
+   * normals relative to the viewing direction (1 = towards the viewer, -1 = inward export).
+   */
+  private surfaceHit(
+    surface: SurfaceConfig,
+    p: NormalizedPoint,
+  ): { point: Vector3; orientation: 1 | -1 } | null {
+    const point = this.surfacePoint(surface, p);
+    if (!point) return null;
+    const dir = surface.facing === '-z' ? new Vector3(0, 0, 1) : new Vector3(0, 0, -1);
+    this.raycaster.set(point.clone().addScaledVector(dir, -this.worldPerCm * 50), dir);
+    const hit = this.raycaster.intersectObjects(this.meshes, false)[0];
+    const normal = hit?.face && (hit.object as Mesh).geometry.getAttribute('normal');
+    if (!hit?.face || !normal) return { point, orientation: 1 };
+    const n = new Vector3();
+    for (const i of [hit.face.a, hit.face.b, hit.face.c])
+      n.add(new Vector3().fromBufferAttribute(normal, i));
+    n.applyMatrix3(new Matrix3().getNormalMatrix(hit.object.matrixWorld));
+    // Facing the viewer means pointing against the ray.
+    return { point, orientation: n.dot(dir) <= 0 ? 1 : -1 };
+  }
+
   private surfacePoint(surface: SurfaceConfig, p: NormalizedPoint): Vector3 | null {
     const target = this.normalizedToWorld(p);
     const dir = surface.facing === '-z' ? new Vector3(0, 0, 1) : new Vector3(0, 0, -1);
@@ -509,8 +546,9 @@ export class GarmentViewer {
 
   private rebuildDecal(slot: DecalSlot): void {
     const input = slot.input;
-    const point = this.surfacePoint(input.surface, input.center);
-    if (!point) return;
+    const surfaceHit = this.surfaceHit(input.surface, input.center);
+    if (!surfaceHit) return;
+    const { point, orientation } = surfaceHit;
     const rotation = (-input.rotationDeg * Math.PI) / 180;
     const quaternion = new Quaternion().setFromEuler(
       input.surface.facing === '-z' ? new Euler(0, Math.PI, rotation) : new Euler(0, 0, rotation),
@@ -520,16 +558,17 @@ export class GarmentViewer {
       input.heightCm * this.worldPerCm,
       this.adapter.decalDepthCm * this.worldPerCm,
     );
-    // Only the garment mesh(es); decal geometry is produced in world space.
-    let geometry = null;
-    for (const mesh of this.meshes) {
-      geometry = buildDecalGeometry(
+    // Every embroiderable garment mesh the projector touches (panels / export chunks), merged;
+    // decal geometry is produced in world space.
+    const parts = this.meshes.flatMap((mesh) => {
+      const g = buildDecalGeometry(
         mesh,
-        { position: point, quaternion, size },
+        { position: point, quaternion, size, orientation },
         this.worldPerCm * 0.04,
       );
-      if (geometry) break;
-    }
+      return g ? [g] : [];
+    });
+    const geometry = mergeDecalGeometries(parts);
     if (!geometry) return;
     if (!slot.mesh) {
       slot.mesh = new Mesh(geometry, slot.material);

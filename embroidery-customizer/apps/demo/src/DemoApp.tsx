@@ -2,11 +2,12 @@ import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import {
   DemoPersistence,
   mountConfigurator,
-  type ConfiguratorProps,
   type EditRequest,
+  type GarmentConfiguratorProps,
+  type GarmentOption,
   type MountHandle,
 } from '@embroidery/configurator';
-import { TSHIRT_V1, formatMoney } from '@embroidery/shared';
+import { GARMENTS, formatMoney } from '@embroidery/shared';
 import { sharedRefFromUrl } from '@embroidery/configurator';
 import {
   DemoCartAdapter,
@@ -17,10 +18,19 @@ import {
   type CartLine,
   type CartSnapshot,
 } from '@embroidery/shopify-cart';
-import { DEMO_PRICING, DEMO_PRODUCT } from '@embroidery/configurator/demo-product';
+import { DEMO_GARMENT_PRODUCTS, DEMO_PRICING } from '@embroidery/configurator/demo-product';
+
+/** Every bundled garment with its own demo product. */
+const DEMO_GARMENTS: GarmentOption[] = GARMENTS.map((adapter) => ({
+  id: adapter.id,
+  label: adapter.label,
+  adapter,
+  modelUrl: new URL(`${import.meta.env.BASE_URL}models/${adapter.modelFile}`, location.href).href,
+  product: DEMO_GARMENT_PRODUCTS[adapter.id]!,
+}));
 
 /** Mounts the real configurator through the same shadow-DOM entry point Shopify uses. */
-function ShadowConfigurator(props: ConfiguratorProps) {
+function ShadowConfigurator(props: GarmentConfiguratorProps) {
   const host = useRef<HTMLDivElement>(null);
   const handle = useRef<MountHandle | null>(null);
   useEffect(() => {
@@ -49,10 +59,6 @@ export function DemoApp() {
   const [edit, setEdit] = useState<EditRequest | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [sharedDesignRef] = useState(() => sharedRefFromUrl());
-  const modelUrl = new URL(
-    `${import.meta.env.BASE_URL}models/${TSHIRT_V1.modelFile}`,
-    location.href,
-  ).href;
 
   useEffect(() => {
     void cart.getCart().then(setSnapshot);
@@ -98,12 +104,10 @@ export function DemoApp() {
   }, [theme]);
   const settings = useMemo(() => ({ theme }), [theme]);
 
-  const props: ConfiguratorProps = {
+  const props: GarmentConfiguratorProps = {
     mode: 'demo',
     settings,
-    adapter: TSHIRT_V1,
-    modelUrl,
-    product: DEMO_PRODUCT,
+    garments: DEMO_GARMENTS,
     cart,
     persistence,
     pricing: DEMO_PRICING,

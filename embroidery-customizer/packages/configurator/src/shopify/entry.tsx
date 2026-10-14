@@ -22,12 +22,27 @@ import {
   type EditRequest,
 } from '../components/Configurator';
 import { IconClose } from '../components/icons';
+import {
+  GarmentConfigurator,
+  type GarmentConfiguratorProps,
+  type GarmentOption,
+} from '../components/GarmentConfigurator';
 import { AppProxyPersistence } from '../persistence/appProxyPersistence';
 import { DemoPersistence } from '../persistence/demoPersistence';
 import { FallbackPersistence } from '../persistence/fallbackPersistence';
 import { fromShopifyProduct, type ShopifyProductJson } from './product';
 
+/** One garment slot of a multi-garment section (its own product + 3D model). */
+export interface GarmentData {
+  modelId: string;
+  modelUrl: string;
+  product: ShopifyProductJson | null;
+  selectedVariantId?: string | number | null;
+}
+
 export interface BlockData {
+  /** Several garments the customer can switch between (theme section); first = default. */
+  garments?: GarmentData[];
   product: ShopifyProductJson | null;
   selectedVariantId?: string | number | null;
   currency: string;
@@ -142,8 +157,64 @@ export function toPricing(
   return { fees, bulkTiers: tiers };
 }
 
+type BlockProps = ConfiguratorProps | GarmentConfiguratorProps;
+const isMulti = (p: BlockProps): p is GarmentConfiguratorProps =>
+  'garments' in p &&
+  Array.isArray(p.garments) &&
+  p.garments.length > 0 &&
+  'adapter' in p.garments[0]!;
+
+/** Props for a section offering several garments (each slot: product + calibrated model). */
+async function buildGarmentProps(
+  data: BlockData,
+  slots: GarmentData[],
+): Promise<GarmentConfiguratorProps> {
+  const settings = toSettings(data);
+  const demo = slots.every((g) => !g.product);
+  const demoData = demo ? await import('./demoProduct') : null;
+  const garments: GarmentOption[] = slots.map((g) => {
+    const adapter = getModelAdapter(g.modelId);
+    return {
+      id: `${adapter.id}:${g.product?.id ?? 'demo'}`,
+      label: adapter.label,
+      adapter,
+      modelUrl: g.modelUrl,
+      product: g.product
+        ? fromShopifyProduct(g.product, data.currency, data.locale)
+        : (demoData!.DEMO_GARMENT_PRODUCTS[adapter.id] ?? demoData!.DEMO_PRODUCT),
+      initialVariantId: g.selectedVariantId ? String(g.selectedVariantId) : null,
+    };
+  });
+  const common = {
+    garments,
+    sharedDesignRef: sharedRefFromUrl(),
+  };
+  if (demo)
+    return {
+      ...common,
+      mode: 'demo',
+      cart: new DemoCartAdapter(),
+      persistence: new DemoPersistence(),
+      pricing: demoData!.DEMO_PRICING,
+      settings: { ...settings, cartUrl: null },
+    };
+  return {
+    ...common,
+    mode: 'shopify',
+    cart: new ShopifyCartAdapter({ root: data.root }),
+    persistence: new FallbackPersistence(
+      new AppProxyPersistence(data.proxyPath, undefined, data.shopUrl || location.origin),
+    ),
+    pricing: toPricing(data.feeVariants, data.samplePrices, data.bulkTiers),
+    settings,
+  };
+}
+
 /** Build configurator props for a block; without a product it runs as a labelled demo. */
-export async function buildProps(data: BlockData): Promise<ConfiguratorProps> {
+export async function buildProps(data: BlockData): Promise<BlockProps> {
+  // A product without its own slot data can't be mixed in: only use slots that resolved.
+  const slots = (data.garments ?? []).filter((g) => g.modelUrl);
+  if (slots.length > 1) return buildGarmentProps(data, slots);
   const adapter = getModelAdapter(data.modelId);
   const settings = toSettings(data);
   const sharedDesignRef = sharedRefFromUrl();
@@ -251,13 +322,17 @@ export function Dialog(p: { label: string; onClose: () => void; children: Compon
   );
 }
 
-function BlockRoot(p: { props: ConfiguratorProps; data: BlockData; scope: HTMLElement }) {
+function BlockRoot(p: { props: BlockProps; data: BlockData; scope: HTMLElement }) {
   const [open, setOpen] = useState(false);
   const themeVariant = useThemeVariant(
-    p.props.mode === 'shopify' && p.data.syncThemeVariant !== false,
+    p.props.mode === 'shopify' && p.data.syncThemeVariant !== false && !isMulti(p.props),
     p.scope,
   );
-  const configurator = <Configurator {...p.props} externalVariantId={themeVariant} />;
+  const configurator = isMulti(p.props) ? (
+    <GarmentConfigurator {...p.props} />
+  ) : (
+    <Configurator {...p.props} externalVariantId={themeVariant} />
+  );
   if (p.data.display !== 'button') return configurator;
   return (
     <>

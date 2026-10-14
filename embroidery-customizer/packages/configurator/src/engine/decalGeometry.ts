@@ -15,6 +15,12 @@ export interface DecalProjector {
   quaternion: Quaternion;
   /** Box size in world units: x = width, y = height, z = projection depth. */
   size: Vector3;
+  /**
+   * Orientation of the visible fabric surface: 1 = its normals point towards the projector,
+   * -1 = away (inward-facing export). Triangles of the other orientation (the inner side of a
+   * two-sided fabric shell) are skipped. Omitted = decided by majority inside the box.
+   */
+  orientation?: 1 | -1;
 }
 
 /** One clipped polygon vertex carrying every attribute we interpolate. */
@@ -125,24 +131,39 @@ export function buildDecalGeometry(
     uv: uv ? [uv.getX(i), uv.getY(i)] : [0, 0],
   });
 
-  for (let t = 0; t < triCount; t++) {
-    const a = index ? index.getX(t * 3) : t * 3;
-    const b = index ? index.getX(t * 3 + 1) : t * 3 + 1;
-    const c = index ? index.getX(t * 3 + 2) : t * 3 + 2;
-
-    // Only surfaces that face the projector (skips inner fabric and the opposite panel).
-    if ((npz[a]! + npz[b]! + npz[c]!) / 3 < 0.08) continue;
-
-    // Cheap reject: all three vertices outside the same box plane.
-    let reject = false;
-    for (let axis = 0; axis < 3 && !reject; axis++) {
+  const tri = (t: number): [number, number, number] =>
+    index
+      ? [index.getX(t * 3), index.getX(t * 3 + 1), index.getX(t * 3 + 2)]
+      : [t * 3, t * 3 + 1, t * 3 + 2];
+  // Cheap reject: all three vertices outside the same box plane.
+  const outsideBox = (a: number, b: number, c: number) => {
+    for (let axis = 0; axis < 3; axis++) {
       const h = axis === 0 ? hx : axis === 1 ? hy : hz;
       const va = pp[a * 3 + axis]!;
       const vb = pp[b * 3 + axis]!;
       const vc = pp[c * 3 + axis]!;
-      if ((va > h && vb > h && vc > h) || (va < -h && vb < -h && vc < -h)) reject = true;
+      if ((va > h && vb > h && vc > h) || (va < -h && vb < -h && vc < -h)) return true;
     }
-    if (reject) continue;
+    return false;
+  };
+
+  // Some exports (e.g. CLO fabric shells) have inward-pointing normals; they render fine
+  // double-sided. Use the visible surface's orientation (or, failing that, the majority inside
+  // the box) and treat it as facing outwards so the facing test and surface offset work.
+  let facing = 0;
+  if (projector.orientation === undefined)
+    for (let t = 0; t < triCount; t++) {
+      const [a, b, c] = tri(t);
+      if (!outsideBox(a, b, c)) facing += npz[a]! + npz[b]! + npz[c]!;
+    }
+  const flip = projector.orientation ?? (facing < 0 ? -1 : 1);
+
+  for (let t = 0; t < triCount; t++) {
+    const [a, b, c] = tri(t);
+
+    // Only surfaces that face the projector (skips inner fabric and the opposite panel).
+    if ((flip * (npz[a]! + npz[b]! + npz[c]!)) / 3 < 0.08) continue;
+    if (outsideBox(a, b, c)) continue;
 
     let poly = [vertexAt(a), vertexAt(b), vertexAt(c)];
     poly = clipPolygon(poly, 0, 1, hx);
@@ -155,7 +176,7 @@ export function buildDecalGeometry(
 
     for (let k = 1; k < poly.length - 1; k++) {
       for (const pv of [poly[0]!, poly[k]!, poly[k + 1]!]) {
-        const len = Math.hypot(pv.n[0], pv.n[1], pv.n[2]) || 1;
+        const len = (Math.hypot(pv.n[0], pv.n[1], pv.n[2]) || 1) * flip;
         const nx = pv.n[0] / len;
         const ny = pv.n[1] / len;
         const nz = pv.n[2] / len;
@@ -179,4 +200,31 @@ export function buildDecalGeometry(
   decal.setAttribute('uv1', new Float32BufferAttribute(outUv1, 2));
   decal.computeBoundingSphere();
   return decal;
+}
+
+/**
+ * Concatenates decal pieces cut from several garment meshes (a garment split into panels, or
+ * one exported as several chunks) into one non-indexed geometry with the same attributes.
+ */
+export function mergeDecalGeometries(parts: BufferGeometry[]): BufferGeometry | null {
+  if (parts.length === 0) return null;
+  if (parts.length === 1) return parts[0]!;
+  const merged = new BufferGeometry();
+  for (const [name, size] of [
+    ['position', 3],
+    ['normal', 3],
+    ['uv', 2],
+    ['uv1', 2],
+  ] as const) {
+    const arrays = parts.map((p) => p.getAttribute(name).array as Float32Array);
+    const out = new Float32Array(arrays.reduce((n, a) => n + a.length, 0));
+    let offset = 0;
+    for (const a of arrays) {
+      out.set(a, offset);
+      offset += a.length;
+    }
+    merged.setAttribute(name, new Float32BufferAttribute(out, size));
+  }
+  for (const p of parts) p.dispose();
+  return merged;
 }

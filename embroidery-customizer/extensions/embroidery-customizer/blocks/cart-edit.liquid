@@ -19,7 +19,7 @@
   data-module-src="{{ 'embroidery-configurator.js' | asset_url }}"
   data-root="{{ routes.root_url }}"
   data-proxy-path="{{ block.settings.proxy_path | default: '/apps/embroidery' }}"
-  data-model-url="{% if block.settings.model_url != blank %}{{ block.settings.model_url }}{% else %}{{ block.settings.proxy_path | default: '/apps/embroidery' }}/model/tshirt-v1.glb{% endif %}"
+  data-model-url="{{ block.settings.model_url }}"
   data-currency="{{ cart.currency.iso_code }}"
   data-locale="{{ request.locale.iso_code }}"
   data-label="{{ block.settings.label | escape }}"
@@ -44,7 +44,7 @@
     { "type": "text", "id": "label", "label": "Button label", "default": "Edit embroidery" },
     { "type": "text", "id": "proxy_path", "label": "App proxy path", "default": "/apps/embroidery" },
     { "type": "product", "id": "fee_product", "label": "Embroidery fee product", "info": "Same product as in the Embroidery customizer block, so edits keep fees correct." },
-    { "type": "text", "id": "model_url", "label": "Model URL override", "info": "Optional GLB URL. Empty = the sample T-shirt served by the app." }
+    { "type": "text", "id": "model_url", "label": "Model URL override", "info": "Optional GLB URL. Empty = each item opens on the garment it was designed on." }
   ]
 }
 {% endschema %}

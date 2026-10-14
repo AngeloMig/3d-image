@@ -58,10 +58,12 @@ if (process.argv.includes('--theme')) {
     console.error(`Theme assets folder not found at ${themeAssets}`);
     process.exit(1);
   }
-  // Replace our previous build in the theme (fonts now live inside JS chunks).
-  for (const f of ours(themeAssets)) if (f !== 'embroidery-tshirt.glb') rmSync(join(themeAssets, f));
+  // Replace our previous build in the theme (fonts live inside JS chunks).
+  for (const f of ours(themeAssets)) rmSync(join(themeAssets, f));
   for (const f of files) copyFileSync(join(extAssets, f), join(themeAssets, f));
-  // Themes may ship .glb assets; the app block gets the model from the app instead.
-  copyFileSync(join(root, 'public/models/tshirt-v1.glb'), join(themeAssets, 'embroidery-tshirt.glb'));
-  console.log(`\nCopied ${files.length + 1} files into the theme: ${themeAssets}`);
+  // Themes may ship .glb assets (the app block gets them from the app instead):
+  // every calibrated garment, as embroidery-<garment>.glb.
+  const models = readdirSync(join(root, 'public/models')).filter((f) => f.endsWith('.glb'));
+  for (const m of models) copyFileSync(join(root, 'public/models', m), join(themeAssets, `embroidery-${m}`));
+  console.log(`\nCopied ${files.length + models.length} files into the theme: ${themeAssets}`);
 }

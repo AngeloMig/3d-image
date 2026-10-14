@@ -172,7 +172,7 @@ export interface GarmentColor {
 
 /** Built-in colour name → hex mapping. Merchants can extend it via the block's colour map setting. */
 export const GARMENT_COLORS: readonly GarmentColor[] = [
-  { name: 'Royal', hex: null },
+  { name: 'Royal', hex: '#2c4aa6' },
   { name: 'White', hex: '#f1f1ee' },
   { name: 'Black', hex: '#232325' },
   { name: 'Navy', hex: '#24304f' },

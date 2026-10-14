@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { TSHIRT_V1, findTemplate, type ProductContext } from '@embroidery/shared';
+import { TSHIRT_V1, findTemplate, getModelAdapter, type ProductContext } from '@embroidery/shared';
 import {
   activeLayer,
   buildConfiguration,
@@ -167,5 +167,24 @@ describe('templates', () => {
     expect(templateLayers(TSHIRT_V1, jersey, {}, { maxDesigns: 2 })).toHaveLength(2);
     const noVarsity = templateLayers(TSHIRT_V1, jersey, {}, { fontIds: ['block'] });
     expect(noVarsity.every((l) => l.text.fontId === 'block')).toBe(true);
+  });
+});
+
+describe('switching garment', () => {
+  it('carries designs over and moves positions the new garment can’t take', () => {
+    const polo = getModelAdapter('polo');
+    let tee = init();
+    tee = reduce(tee, { type: 'setPosition', positionId: 'center_chest' });
+    tee = reduce(tee, { type: 'addLayer', positionId: 'center_back' });
+    const design = buildConfiguration(tee);
+    const onPolo = initialEditorState(polo, product, 'polo.glb');
+    const s = editorReducer(polo)(onPolo, {
+      type: 'load',
+      config: design,
+      editing: null,
+      keepProduct: true,
+    });
+    expect(s.product).toEqual(onPolo.product); // garment's own product/variant kept
+    expect(s.layers.map((l) => l.placement.positionId)).toEqual(['left_chest', 'center_back']);
   });
 });

@@ -27,7 +27,9 @@ export function listSavedDesigns(): SavedDesign[] {
   try {
     const raw = storage()?.getItem(KEY);
     const list: unknown = raw ? JSON.parse(raw) : [];
-    return Array.isArray(list) ? (list as SavedDesign[]).filter((d) => typeof d?.ref === 'string') : [];
+    return Array.isArray(list)
+      ? (list as SavedDesign[]).filter((d) => typeof d?.ref === 'string')
+      : [];
   } catch {
     return [];
   }

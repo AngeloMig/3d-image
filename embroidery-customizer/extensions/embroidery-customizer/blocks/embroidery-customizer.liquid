@@ -14,8 +14,7 @@
   data-module-src="{{ 'embroidery-configurator.js' | asset_url }}"
   {{ block.shopify_attributes }}
 >
-  {%- assign default_model = block.settings.proxy_path | default: '/apps/embroidery' | append: '/model/tshirt-v1.glb' -%}
-  {% render 'embroidery-config', p: p, s: block.settings, default_model: default_model %}
+  {% render 'embroidery-config', p: p, s: block.settings, model_source: 'app' %}
   <div class="embroidery-customizer-block__placeholder" aria-hidden="true"></div>
   <p data-embroidery-fallback hidden>{{ 'embroidery.load_error' | t }}</p>
   <noscript>{{ 'embroidery.noscript' | t }}</noscript>
@@ -73,13 +72,16 @@
     ] },
     { "type": "header", "content": "Thread and garment colours" },
     { "type": "text", "id": "thread_colors", "label": "Thread colours offered", "info": "Leave empty to offer all 20 colours, or list ids (first = default): white, black, cream, silver, charcoal, navy, royal, sky, teal, forest, kelly, olive, gold, yellow, orange, red, burgundy, blush, fuchsia, purple." },
-    { "type": "textarea", "id": "garment_colors", "label": "Garment colour map", "default": "Royal: original\nWhite: #f1f1ee\nBlack: #232325\nNavy: #24304f\nBeige: #d9c8a9", "info": "One per line: <colour option value>: <hex>. Use 'original' to keep the 3D model's own texture colour." },
+    { "type": "textarea", "id": "garment_colors", "label": "Garment colour map", "default": "Royal: #2c4aa6\nWhite: #f1f1ee\nBlack: #232325\nNavy: #24304f\nBeige: #d9c8a9", "info": "One per line: <colour option value>: <hex>. Use 'original' to keep the 3D model's own texture colour." },
     { "type": "header", "content": "3D model" },
     { "type": "checkbox", "id": "use_product_model", "label": "Use the product's 3D model media (GLB) when available", "default": true },
-    { "type": "text", "id": "model_url", "label": "Model URL override", "info": "Optional GLB URL (e.g. uploaded to Content → Files). Empty = the sample T-shirt served by the app." },
-    { "type": "select", "id": "model_profile", "label": "Model calibration profile", "default": "tshirt-v1", "options": [
-      { "value": "tshirt-v1", "label": "Classic T-shirt (sample model)" }
-    ], "info": "Embroidery zones are calibrated per model. New garments need a new profile." },
+    { "type": "text", "id": "model_url", "label": "Model URL override", "info": "Optional GLB URL (e.g. uploaded to Content → Files). Empty = the garment model served by the app." },
+    { "type": "select", "id": "model_profile", "label": "Garment (3D model)", "default": "crew-tee", "options": [
+      { "value": "crew-tee", "label": "Classic T-shirt" },
+      { "value": "sport-tee", "label": "Sport T-shirt" },
+      { "value": "polo", "label": "Polo shirt" },
+      { "value": "long-sleeve", "label": "Long-sleeve T-shirt" }
+    ], "info": "Embroidery positions are calibrated per model; pick the one matching this product." },
     { "type": "header", "content": "Pricing & extra features" },
     { "type": "text", "id": "fee_product_handle", "label": "Embroidery fee product (handle)", "placeholder": "embroidery-fee", "info": "The handle of a product with variants named after each fee: Text, Logo, Medium size, Large size, 3D Puff, Metallic thread, Woven patch, Chenille, Premium font. Their Shopify prices are shown live and added to the cart." },
     { "type": "textarea", "id": "sample_prices", "label": "Sample add-on prices (preview only)", "default": "Text: 5\nLogo: 8\nMedium size: 3\nLarge size: 6\n3D Puff: 4\nMetallic thread: 3\nWoven patch: 6\nChenille: 7\nPremium font: 2", "info": "Shown only while no Embroidery fee product is selected, labelled 'not charged yet'. Amounts in your store currency. Clear it to hide prices." },

@@ -146,7 +146,9 @@ async function syncFees(cfg: CartEditConfig, items: CartItem[]): Promise<boolean
     if (!id || i.properties?.[FEE_FOR] || !plan) continue;
     for (const part of plan.split(';')) {
       const [code, per, variantId] = part.split(':');
-      const present = items.some((f) => f.properties?.[FEE_FOR] === id && f.properties?.['_Embroidery Fee Kind'] === code);
+      const present = items.some(
+        (f) => f.properties?.[FEE_FOR] === id && f.properties?.['_Embroidery Fee Kind'] === code,
+      );
       if (!present && code && Number(per) > 0 && variantId)
         additions.push({
           id: Number(variantId),

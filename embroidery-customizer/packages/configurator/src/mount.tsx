@@ -1,9 +1,22 @@
 import { render } from 'preact';
 import styles from './styles.css?inline';
 import { Configurator, type ConfiguratorProps } from './components/Configurator';
+import {
+  GarmentConfigurator,
+  type GarmentConfiguratorProps,
+} from './components/GarmentConfigurator';
+
+/** One garment, or several the customer can switch between. */
+export type MountProps = ConfiguratorProps | GarmentConfiguratorProps;
+
+const isMulti = (p: MountProps): p is GarmentConfiguratorProps =>
+  'garments' in p &&
+  Array.isArray(p.garments) &&
+  p.garments.length > 0 &&
+  'adapter' in p.garments[0]!;
 
 export interface MountHandle {
-  update(next: Partial<ConfiguratorProps>): void;
+  update(next: Partial<MountProps>): void;
   unmount(): void;
 }
 
@@ -13,7 +26,7 @@ export interface MountHandle {
  */
 export function mountConfigurator(
   host: HTMLElement,
-  props: ConfiguratorProps,
+  props: MountProps,
   opts: { shadow?: boolean } = {},
 ): MountHandle {
   const root: HTMLElement | ShadowRoot =
@@ -35,13 +48,17 @@ export function mountConfigurator(
     scheduled = true;
     queueMicrotask(() => {
       scheduled = false;
-      if (mounted) render(<Configurator {...current} />, container);
+      if (!mounted) return;
+      render(
+        isMulti(current) ? <GarmentConfigurator {...current} /> : <Configurator {...current} />,
+        container,
+      );
     });
   };
   schedule();
   return {
     update(next) {
-      current = { ...current, ...next };
+      current = { ...current, ...next } as MountProps;
       schedule();
     },
     unmount() {

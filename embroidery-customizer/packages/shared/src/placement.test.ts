@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { TSHIRT_V1, availablePlacements } from './models';
+import { GARMENTS, TSHIRT_V1, availablePlacements, getModelAdapter } from './models';
 import {
   constrainPlacement,
   defaultPlacement,
@@ -132,5 +132,31 @@ describe('imageIntrinsicSize', () => {
       scale: 0.5,
     };
     expect(imageIntrinsicSize(preset, image)).toEqual({ widthCm: 11, heightCm: 5.5 });
+  });
+});
+
+describe('garment calibrations', () => {
+  for (const g of GARMENTS)
+    it(`${g.label}: every offered position starts inside its surface's safe area`, () => {
+      for (const p of availablePlacements(g)) {
+        const surface = g.surfaces.find((s) => s.id === p.surfaceId)!;
+        const b = surface.safeBounds;
+        expect(p.anchor.x, `${p.id} x`).toBeGreaterThan(b.xMin);
+        expect(p.anchor.x, `${p.id} x`).toBeLessThan(b.xMax);
+        expect(p.anchor.y, `${p.id} y`).toBeGreaterThan(b.yMin);
+        expect(p.anchor.y, `${p.id} y`).toBeLessThan(b.yMax);
+        // Chest logos sit below the neckline, the centre-back design below the upper back.
+        if (p.id === 'center_back')
+          expect(p.anchor.y).toBeLessThan(
+            g.placements.find((x) => x.id === 'upper_back')!.anchor.y,
+          );
+      }
+    });
+
+  it('keeps old "tshirt-v1" designs working on the new crew tee', () => {
+    expect(getModelAdapter('tshirt-v1').id).toBe('crew-tee');
+    expect(availablePlacements(getModelAdapter('polo')).map((p) => p.id)).not.toContain(
+      'center_chest',
+    );
   });
 });

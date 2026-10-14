@@ -121,7 +121,8 @@ export class DesignRasterizer {
 
   private prepare(widthCm: number, heightCm: number, style: StitchStyle = 'flat') {
     // Patches extend past the design; puff throws a deeper shadow.
-    const extra = style === 'patch' ? 0.75 : style === 'puff' ? 0.2 : style === 'chenille' ? 0.15 : 0;
+    const extra =
+      style === 'patch' ? 0.75 : style === 'puff' ? 0.2 : style === 'chenille' ? 0.15 : 0;
     const pad = Math.min(widthCm, heightCm) * DESIGN_PADDING + 0.15 + extra;
     const canvasWidthCm = widthCm + pad * 2;
     const canvasHeightCm = heightCm + pad * 2;
@@ -263,7 +264,7 @@ export class DesignRasterizer {
     const tile = makeCanvas(48, 48);
     const t = ctx2d(tile);
     let seed = 7;
-    const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+    const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
     for (let i = 0; i < 520; i++) {
       t.fillStyle = rnd() > 0.5 ? 'rgba(255,255,255,0.55)' : 'rgba(0,0,0,0.45)';
       t.beginPath();
@@ -318,10 +319,14 @@ export class DesignRasterizer {
       }
     } else {
       // Satin stitches (finer and brighter for metallic, bolder for puff).
-      const spacing = Math.max(3, featurePx * (style === 'metallic' ? 0.06 : style === 'puff' ? 0.12 : 0.09));
+      const spacing = Math.max(
+        3,
+        featurePx * (style === 'metallic' ? 0.06 : style === 'puff' ? 0.12 : 0.09),
+      );
       const pattern = this.stripes(tinted, spacing);
       if (pattern) {
-        tinted.globalAlpha = (style === 'metallic' ? 0.4 : style === 'puff' ? 0.34 : 0.28) * stripeStrength;
+        tinted.globalAlpha =
+          (style === 'metallic' ? 0.4 : style === 'puff' ? 0.34 : 0.28) * stripeStrength;
         tinted.fillStyle = pattern;
         tinted.fillRect(0, 0, w, h);
       }
@@ -430,7 +435,14 @@ function luminance(hex: string): number {
   const [r, g, b] = hexToRgb(hex);
   return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
 }
-function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number): void {
+function roundRect(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  r: number,
+): void {
   ctx.beginPath();
   ctx.moveTo(x + r, y);
   ctx.arcTo(x + w, y, x + w, y + h, r);

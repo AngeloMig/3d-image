@@ -56,23 +56,34 @@ npm run theme:build       # same, and copies it into the host theme's assets/ fo
 npm run check         # everything above except e2e
 ```
 
-## The 3D model
+## The 3D models (garments)
 
-| | |
-|---|---|
-| Source | `models/source/tshirt-source.glb` (Blender export, 2.11 MB) |
-| Served | `apps/demo/public/models/tshirt.glb` and `extensions/embroidery-customizer/assets/embroidery-tshirt.glb` (224 KB) |
-| Optimize | `npm run model:optimize` — WebP textures (≤1024px), meshopt + quantized geometry, **no simplification** |
+Four calibrated garments; customers switch between them on the first step and keep their design.
 
-Inspected structure: one mesh (`RetopoMain.004`, 2,841 vertices / 4,970 triangles), packed UV atlas, one
-double-sided PBR material with base colour, normal and metallic-roughness maps. Units are metres; the
-front faces **+Z** (V-neck at y≈1.677, back neck y≈1.771).
+| Garment | Id | Source (Sketchfab/CLO export) | Served | Triangles |
+|---|---|---|---|---|
+| Classic T-shirt (crew neck) | `crew-tee` | `tshirt.glb` 4.6 MB | 318 KB | 154k → 27k |
+| Sport T-shirt (raglan) | `sport-tee` | `t-shirt.glb` 38 MB | 471 KB | 612k → 21k |
+| Polo shirt | `polo` | `short_sleeve_polo.glb` 11.5 MB | 551 KB | 179k → 29k |
+| Long-sleeve T-shirt | `long-sleeve` | `long_sleeve_t-_shirt.glb` 36 MB | 618 KB | 906k → 33k |
+
+- Sources go in `models/source/raw/` (git-ignored). `npm run models:prepare` drops stitch-thread meshes
+  (hundreds of thousands of triangles, invisible at web size), simplifies the fabric while locking UV
+  seams, re-encodes textures as WebP (≤1024 px, normal maps 512 px) and meshopt-compresses geometry.
+  Output: `apps/demo/public/models/<id>.glb` and `public/models/<id>.glb` (served by the app);
+  `npm run theme:build` copies them into the theme as `assets/embroidery-<id>.glb`.
+- Calibration lives in `packages/shared/src/models.ts`: each garment's measurements (neckline,
+  hem, torso width, embroiderable meshes) feed one set of placement rules (chest logo 8 cm under the
+  neckline and 9 cm off centre, etc.). The polo has no Center Chest (button placket).
+- All models face **+Z**, units are metres. Some CLO/Sketchfab exports are two-sided fabric shells with
+  inward normals; the decal builder embroiders the layer the camera actually sees.
+- The previous sample shirt (`tshirt-v1`) was removed; old saved designs open on the crew tee.
 
 How it is rendered:
 
 - **Original materials and textures are preserved.** Garment colour changes use a shader tint that keeps
-  the texture’s shading and the authored white trim / contrast stitching; the normal map (fabric folds)
-  and roughness map stay in place. Roughness is remapped ×1.45 into a cotton range (`fabricRoughnessScale`).
+  the texture’s shading and authored trim; untextured panels and near-black fabric take a flat tint
+  (the normal map keeps the weave).
 - **Embroidery follows the surface.** Designs are rasterized to a transparent canvas (thread colour, satin
   stitch striping, raised shadow) and projected with a custom decal builder that clips the garment’s own
   triangles to an oriented box — so the patch bends with the shirt. The decal also reuses the garment’s
@@ -87,10 +98,12 @@ How it is rendered:
 The block resolves the model in this order:
 1. The product’s own **3D model media** (upload the GLB in the product’s Media section) — recommended.
 2. **Model URL override** setting (e.g. a GLB uploaded to *Content → Files*).
-3. The bundled sample `embroidery-tshirt.glb` from the extension’s CDN assets.
+3. The bundled garment chosen in *Garment (3D model)*: `assets/embroidery-<id>.glb` in the theme
+   section, `/apps/embroidery/model/<id>.glb` (served by the app) in the app block.
 
-A different garment needs its own calibration profile (a new `ModelAdapter`): measure its bounding box,
-facing axis and torso area, then add placements — see `TSHIRT_V1` for a commented example.
+The homepage section has **More garments** slots (product + model each) — e.g. the T-shirt, polo and
+long-sleeve products — and shows a garment switch. A new garment needs its own calibration: add the
+source to `scripts/prepare-garments.mjs`, measure it, and add a `garment({...})` entry in `models.ts`.
 
 ## Installing on Shopify
 

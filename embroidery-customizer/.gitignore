@@ -14,3 +14,8 @@ prisma/*.db*
 storage/
 .shopify/
 .DS_Store
+
+# Original downloaded garment models (large); only optimized outputs are committed.
+models/source/raw/
+# Temporary model inspection copies
+apps/demo/public/models/raw/

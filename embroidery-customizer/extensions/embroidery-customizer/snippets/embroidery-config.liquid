@@ -3,27 +3,81 @@
 
   @param {object} [p] - Product to customize (blank = demo mode)
   @param {object} s - block.settings or section.settings
-  @param {string} default_model - GLB used when neither the product nor the settings set one
+  @param {string} model_source - Where bundled garment models live: 'theme' (theme assets) or 'app' (served by the app)
 {%- enddoc -%}
 
 {%- liquid
-  assign model_url = s.model_url | strip
-  if s.use_product_model and p != blank
-    for media in p.media
-      if media.media_type == 'model'
-        for source in media.sources
-          if source.format == 'glb'
-            assign model_url = source.url
+  # Garment slots: slot 1 is the block/section product; sections can add up to 3 more garments
+  # (product_2..4 + model_profile_2..4). Each slot gets its own 3D model:
+  # product 3D media (GLB) → model URL override (slot 1 only) → the bundled calibrated model.
+  assign proxy = s.proxy_path | default: '/apps/embroidery'
+  capture garments_json
+    assign first = true
+    for i in (1..4)
+      if i == 1
+        assign gp = p
+        assign gid = s.model_profile | default: 'crew-tee'
+      else
+        assign pkey = 'product_' | append: i
+        assign mkey = 'model_profile_' | append: i
+        assign gp = s[pkey]
+        assign gid = s[mkey] | default: 'crew-tee'
+        if gp == blank
+          continue
+        endif
+      endif
+      if gid == 'tshirt-v1'
+        assign gid = 'crew-tee'
+      endif
+
+      assign gurl = ''
+      if s.use_product_model and gp != blank
+        for media in gp.media
+          if media.media_type == 'model'
+            for source in media.sources
+              if source.format == 'glb'
+                assign gurl = source.url
+                break
+              endif
+            endfor
             break
           endif
         endfor
-        break
       endif
+      if gurl == blank and i == 1
+        assign gurl = s.model_url | strip
+      endif
+      if gurl == blank
+        if model_source == 'app'
+          assign gurl = proxy | append: '/model/' | append: gid | append: '.glb'
+        else
+          assign gurl = 'embroidery-' | append: gid | append: '.glb' | asset_url
+        endif
+      endif
+      if i == 1
+        assign model_url = gurl
+        assign model_id = gid
+      endif
+
+      unless first
+        echo ','
+      endunless
+      assign first = false
+      echo '{"modelId": '
+      echo gid | json
+      echo ', "modelUrl": '
+      echo gurl | json
+      echo ', "selectedVariantId": '
+      if gp != blank
+        echo gp.selected_or_first_available_variant.id | json
+        echo ', "product": '
+        render 'embroidery-product-json', product: gp
+      else
+        echo 'null, "product": null'
+      endif
+      echo '}'
     endfor
-  endif
-  if model_url == blank
-    assign model_url = default_model
-  endif
+  endcapture
 
   # App blocks allow one product picker, so the fee product can also be given by handle.
   assign fee_product = s.fee_product
@@ -52,27 +106,16 @@
 -%}
 <script type="application/json" data-embroidery-config>
   {
-    "product": {%- if p != blank -%}
-      {
-        "id": {{ p.id | json }},
-        "title": {{ p.title | json }},
-        "handle": {{ p.handle | json }},
-        "options": {{ p.options | json }},
-        "variants": [
-          {%- for v in p.variants -%}
-            {"id": {{ v.id | json }}, "title": {{ v.title | json }}, "options": {{ v.options | json }}, "available": {{ v.available | json }}, "price": {{ v.price | json }}}{% unless forloop.last %},{% endunless %}
-          {%- endfor -%}
-        ]
-      }
-    {%- else -%}null{%- endif -%},
+    "product": {% if p != blank %}{% render 'embroidery-product-json', product: p %}{% else %}null{% endif %},
+    "garments": [{{ garments_json }}],
     "selectedVariantId": {% if p != blank %}{{ p.selected_or_first_available_variant.id | json }}{% else %}null{% endif %},
     "currency": {{ cart.currency.iso_code | json }},
     "locale": {{ request.locale.iso_code | json }},
     "root": {{ routes.root_url | json }},
     "shopUrl": {{ shop.url | json }},
     "modelUrl": {{ model_url | json }},
-    "modelId": {{ s.model_profile | default: 'tshirt-v1' | json }},
-    "proxyPath": {{ s.proxy_path | default: '/apps/embroidery' | json }},
+    "modelId": {{ model_id | json }},
+    "proxyPath": {{ proxy | json }},
     "display": {{ s.display | default: 'inline' | json }},
     "buttonLabel": {{ s.button_label | json }},
     "syncThemeVariant": {{ s.sync_theme_variant | json }},

@@ -24,7 +24,7 @@
     "demo": "npm run dev -w @embroidery/demo",
     "demo:build": "npm run build -w @embroidery/demo",
     "demo:preview": "npm run preview -w @embroidery/demo",
-    "model:optimize": "node scripts/optimize-model.mjs",
+    "models:prepare": "node scripts/prepare-garments.mjs",
     "extension:build": "node scripts/build-storefront.mjs",
     "theme:build": "node scripts/build-storefront.mjs --theme",
     "typecheck": "tsc -p tsconfig.json --noEmit && react-router typegen && tsc -p tsconfig.app.json --noEmit",

@@ -201,3 +201,31 @@ test('team jersey template: name + number per person, bulk saving from 10 shirts
   await expect(lines.nth(0)).toContainText('SAM #7');
   await expect(lines.nth(3)).toContainText('PLAYER3 #10');
 });
+
+test('garments: switching to the polo keeps the designs and moves Center Chest', async ({
+  page,
+}) => {
+  await page.getByTestId('step-3').click();
+  await page.getByTestId('position-choice').locator('[data-value="center_chest"]').click();
+  await addBackName(page, 'COACH');
+  await expect.poll(async () => (await viewerState(page, HOST)).decals?.length).toBe(2);
+
+  await page.getByTestId('step-1').click();
+  await page.getByTestId('garment-choice').locator('[data-value="polo"]').click();
+  await waitForViewer(page);
+  await expect(page.locator(HOST).locator('.emb-preview-summary strong')).toHaveText(
+    'Embroidered Polo',
+  );
+  // Both designs are on the polo; the chest one moved off the button placket.
+  await expect.poll(async () => (await viewerState(page, HOST)).decals?.length).toBe(2);
+  await page.getByTestId('step-3').click();
+  await expect(page.getByTestId('unavailable-positions')).toContainText(
+    'Center Chest: the button placket',
+  );
+  await page.getByTestId('step-4').click();
+  await expect(page.getByTestId('review-summary')).toContainText('Left Chest');
+  await expect(page.getByTestId('review-summary')).toContainText('COACH');
+  await page.getByTestId('add-to-cart').click();
+  await page.getByTestId('open-cart').click();
+  await expect(page.getByTestId('cart-line').first()).toContainText('Embroidered Polo');
+});

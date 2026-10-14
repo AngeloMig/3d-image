@@ -14,6 +14,10 @@ interface Props {
   colorOverrides: Record<string, string | null>;
   originalColorHex: string | null;
   onOption: (name: string, value: string) => void;
+  /** Other garments the customer can switch to (designs carry over). */
+  garments?: { id: string; label: string }[];
+  garmentId?: string;
+  onGarment?: (id: string) => void;
 }
 
 export function ProductStep(p: Props) {
@@ -38,6 +42,16 @@ export function ProductStep(p: Props) {
           </p>
         ) : null}
       </div>
+      {p.garments && p.garments.length > 1 && p.onGarment ? (
+        <Choice
+          label="Garment"
+          value={p.garmentId ?? p.garments[0]!.id}
+          variant="pills"
+          testId="garment-choice"
+          onChange={p.onGarment}
+          options={p.garments.map((g) => ({ value: g.id, label: g.label }))}
+        />
+      ) : null}
       {p.product.isDemo ? (
         <p class="emb-field__hint" data-testid="demo-variants-notice">
           Demo garment · sample sizes and colours

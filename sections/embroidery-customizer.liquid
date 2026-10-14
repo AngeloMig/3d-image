@@ -19,8 +19,7 @@
       data-embroidery-root
       data-module-src="{{ 'embroidery-configurator.js' | asset_url }}"
     >
-      {%- assign default_model = 'embroidery-tshirt.glb' | asset_url -%}
-      {% render 'embroidery-config', p: p, s: section.settings, default_model: default_model %}
+      {% render 'embroidery-config', p: p, s: section.settings, model_source: 'theme' %}
       <div class="embroidery-customizer-block__placeholder" aria-hidden="true"></div>
       <p data-embroidery-fallback hidden>The embroidery customizer couldn't load. Please refresh the page.</p>
       <noscript>Please enable JavaScript to personalize this product.</noscript>
@@ -94,12 +93,38 @@
     ] },
     { "type": "header", "content": "Thread and garment colours" },
     { "type": "text", "id": "thread_colors", "label": "Thread colours offered", "info": "Leave empty to offer all 20 colours, or list ids (first = default): white, black, cream, silver, charcoal, navy, royal, sky, teal, forest, kelly, olive, gold, yellow, orange, red, burgundy, blush, fuchsia, purple." },
-    { "type": "textarea", "id": "garment_colors", "label": "Garment colour map", "default": "Royal: original\nWhite: #f1f1ee\nBlack: #232325\nNavy: #24304f\nBeige: #d9c8a9", "info": "One per line: <colour option value>: <hex>, or 'original' to keep the model's texture." },
+    { "type": "textarea", "id": "garment_colors", "label": "Garment colour map", "default": "Royal: #2c4aa6\nWhite: #f1f1ee\nBlack: #232325\nNavy: #24304f\nBeige: #d9c8a9", "info": "One per line: <colour option value>: <hex>, or 'original' to keep the model's texture." },
     { "type": "header", "content": "3D model" },
     { "type": "checkbox", "id": "use_product_model", "label": "Use the product's 3D model media (GLB) when available", "default": true },
-    { "type": "text", "id": "model_url", "label": "Model URL override", "info": "Optional GLB URL (e.g. from Content → Files). Empty = bundled sample T-shirt." },
-    { "type": "select", "id": "model_profile", "label": "Model calibration profile", "default": "tshirt-v1", "options": [
-      { "value": "tshirt-v1", "label": "Classic T-shirt (sample model)" }
+    { "type": "text", "id": "model_url", "label": "Model URL override", "info": "Optional GLB URL for the first garment (e.g. from Content → Files). Empty = the bundled 3D model." },
+    { "type": "select", "id": "model_profile", "label": "Garment (3D model)", "default": "crew-tee", "options": [
+      { "value": "crew-tee", "label": "Classic T-shirt" },
+      { "value": "sport-tee", "label": "Sport T-shirt" },
+      { "value": "polo", "label": "Polo shirt" },
+      { "value": "long-sleeve", "label": "Long-sleeve T-shirt" }
+    ], "info": "The garment for the product above. Embroidery positions are calibrated per model." },
+    { "type": "header", "content": "More garments" },
+    { "type": "paragraph", "content": "Offer up to 3 more garments. Customers switch between them on the first step and keep their design." },
+    { "type": "product", "id": "product_2", "label": "Garment 2 product" },
+    { "type": "select", "id": "model_profile_2", "label": "Garment 2 model", "default": "polo", "options": [
+      { "value": "crew-tee", "label": "Classic T-shirt" },
+      { "value": "sport-tee", "label": "Sport T-shirt" },
+      { "value": "polo", "label": "Polo shirt" },
+      { "value": "long-sleeve", "label": "Long-sleeve T-shirt" }
+    ] },
+    { "type": "product", "id": "product_3", "label": "Garment 3 product" },
+    { "type": "select", "id": "model_profile_3", "label": "Garment 3 model", "default": "long-sleeve", "options": [
+      { "value": "crew-tee", "label": "Classic T-shirt" },
+      { "value": "sport-tee", "label": "Sport T-shirt" },
+      { "value": "polo", "label": "Polo shirt" },
+      { "value": "long-sleeve", "label": "Long-sleeve T-shirt" }
+    ] },
+    { "type": "product", "id": "product_4", "label": "Garment 4 product" },
+    { "type": "select", "id": "model_profile_4", "label": "Garment 4 model", "default": "sport-tee", "options": [
+      { "value": "crew-tee", "label": "Classic T-shirt" },
+      { "value": "sport-tee", "label": "Sport T-shirt" },
+      { "value": "polo", "label": "Polo shirt" },
+      { "value": "long-sleeve", "label": "Long-sleeve T-shirt" }
     ] },
     { "type": "header", "content": "Pricing & extra features" },
     { "type": "product", "id": "fee_product", "label": "Embroidery fee product", "info": "Optional. A product with variants named after each fee: \"Text\", \"Logo\", \"Medium size\", \"Large size\", \"3D Puff\", \"Metallic thread\", \"Woven patch\", \"Chenille\", \"Premium font\". Their Shopify prices are shown live and added to the cart." },

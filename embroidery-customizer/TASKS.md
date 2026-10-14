@@ -40,7 +40,7 @@ Legend: `[x]` done and verified locally · `[~]` implemented, needs a real Shopi
 - [~] 8. Bulk discount tiers shown live; create matching Shopify automatic discounts to charge them
 
 ## Backlog — noted for later (not started)
-- 2. More garments: hoodie, polo, cap, tote — each needs its own GLB + placement calibration
+- [x] 2. More garments: crew tee, sport tee, polo, long-sleeve (calibrated, switchable, design carries over); next: hoodie, cap, tote
 - 4. Sleeve and back-neck placement (needs sleeve calibration on the current model)
 - 7. "See it on a person": model photo / AR quick look on phones
 - 9. Gift options: gift wrap, gift message, hide prices on the packing slip
