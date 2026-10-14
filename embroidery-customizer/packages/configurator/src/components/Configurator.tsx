@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'preact/hooks';
 import {
+  DESIGN_TEMPLATES,
   FONTS,
   LIMITS,
   NO_PRICING,
@@ -21,6 +22,8 @@ import {
   resolvePlacement,
   textLines,
   validateConfiguration,
+  withBulkDiscount,
+  type DesignTemplate,
   type EmbroideryConfiguration,
   type FeeCode,
   type ModelAdapter,
@@ -51,6 +54,7 @@ import {
   editorReducer,
   freePositions,
   initialEditorState,
+  templateLayers,
   layerDesign,
   productSelection,
   variantForOption,
@@ -71,6 +75,7 @@ import { PlacementStep } from './PlacementStep';
 import { ProductStep, isColorOption } from './ProductStep';
 import { ReviewStep, type ReviewLayer } from './ReviewStep';
 import { TeamOrderPanel, newTeamRow, type TeamRow } from './TeamOrderPanel';
+import { TemplatePicker } from './TemplatePicker';
 import { PriceBar } from './PriceBar';
 import { Viewer } from './Viewer';
 import { Notice } from './controls';
@@ -100,6 +105,8 @@ export interface ConfiguratorSettings {
   maxDesigns: number;
   teamOrders: boolean;
   sharing: boolean;
+  /** Offer ready-made design templates on the Design step. */
+  templates: boolean;
 }
 
 export const DEFAULT_SETTINGS: ConfiguratorSettings = {
@@ -121,6 +128,7 @@ export const DEFAULT_SETTINGS: ConfiguratorSettings = {
   maxDesigns: LIMITS.maxDesigns,
   teamOrders: true,
   sharing: true,
+  templates: true,
 };
 
 export interface EditRequest {
@@ -424,8 +432,8 @@ export function Configurator(props: ConfiguratorProps) {
   };
 
   const computeLayout = useCallback(
-    (l: EditorLayer): LayerLayout => {
-      const rasterizer = rasterizerFor(l.id);
+    (l: EditorLayer, own?: DesignRasterizer): LayerLayout => {
+      const rasterizer = own ?? rasterizerFor(l.id);
       const preset = getPreset(adapter, l.placement.positionId);
       if (!preset) return { layerId: l.id, resolved: null, raster: null };
       if (l.activeDesign === 'text' || !l.image) {
@@ -491,28 +499,28 @@ export function Configurator(props: ConfiguratorProps) {
   }, [layouts]);
 
   /* ---------------- push to the 3D viewer ---------------- */
+  const decalsFor = (lays: LayerLayout[], layers: EditorLayer[]) =>
+    lays.flatMap((x) => {
+      const l = layers.find((y) => y.id === x.layerId);
+      const surface = x.resolved && getSurface(adapter, x.resolved.preset.surfaceId);
+      if (!l || !x.raster || !x.resolved || !surface) return [];
+      return [
+        {
+          id: x.layerId,
+          canvas: x.raster.canvas,
+          version: x.raster.version,
+          surface,
+          center: x.resolved.center,
+          widthCm: x.raster.canvasWidthCm,
+          heightCm: x.raster.canvasHeightCm,
+          rotationDeg: l.placement.rotationDeg,
+        },
+      ];
+    });
   useEffect(() => {
     const viewer = viewerRef.current;
     if (!viewer || !viewerReady) return;
-    viewer.setDecals(
-      layouts.flatMap((x) => {
-        const l = state.layers.find((y) => y.id === x.layerId);
-        const surface = x.resolved && getSurface(adapter, x.resolved.preset.surfaceId);
-        if (!l || !x.raster || !x.resolved || !surface) return [];
-        return [
-          {
-            id: x.layerId,
-            canvas: x.raster.canvas,
-            version: x.raster.version,
-            surface,
-            center: x.resolved.center,
-            widthCm: x.raster.canvasWidthCm,
-            heightCm: x.raster.canvasHeightCm,
-            rotationDeg: l.placement.rotationDeg,
-          },
-        ];
-      }),
-    );
+    viewer.setDecals(decalsFor(layouts, state.layers));
   }, [layouts, viewerReady, adapter]);
 
   const colorOption = product.options.find((o) => isColorOption(o.name));
@@ -604,20 +612,35 @@ export function Configurator(props: ConfiguratorProps) {
   const variant = product.variants.find((v) => v.id === state.product.variantId);
   const textLayers = state.layers.filter((l) => l.activeDesign === 'text');
   const [personalizedId, setPersonalizedId] = useState<string | null>(null);
-  // Default: a text design on the back (where team names usually go), else the first text design.
-  const personalizedLayer =
-    textLayers.find((l) => l.id === personalizedId) ??
-    textLayers.find((l) => getPreset(adapter, l.placement.positionId)?.surfaceId === 'back') ??
-    textLayers[0] ??
+  // Jersey number: a template's number layer, else a text design that is just a number ("10").
+  const numberLayer =
+    textLayers.find((l) => l.role === 'number') ??
+    textLayers.find((l) => /^\d{1,2}$/.test(l.text.text.trim())) ??
     null;
+  const nameCandidates = textLayers.filter((l) => l.id !== numberLayer?.id);
+  // Default name design: a template's name layer, a text design on the back (where team names
+  // usually go), else the first text design.
+  const personalizedLayer =
+    nameCandidates.find((l) => l.id === personalizedId) ??
+    nameCandidates.find((l) => l.role === 'name') ??
+    nameCandidates.find((l) => getPreset(adapter, l.placement.positionId)?.surfaceId === 'back') ??
+    nameCandidates[0] ??
+    null;
+  /** Per-row text for a layer (name or number), or null when the layer isn't personalized. */
+  const rowTextFor = (row: TeamRow, layerId: string): string | null => {
+    if (personalizedLayer && layerId === personalizedLayer.id && row.text.trim())
+      return row.text.trim();
+    if (numberLayer && layerId === numberLayer.id && row.number.trim()) return row.number.trim();
+    return null;
+  };
   const teamVariant = (row: TeamRow) =>
     sizeOption ? variantForOption(product, state.product.options, sizeOption, row.size) : variant;
   /** Designs for one team row: the personalized text is re-measured, since size tiers can change. */
   const rowDesigns = (row: TeamRow) =>
     state.layers.map((l) => {
-      if (!personalizedLayer || l.id !== personalizedLayer.id || !row.text.trim())
-        return { design: layerDesign(l), rendered: renderedMap[l.id] ?? null };
-      const text = { ...l.text, text: row.text.trim() };
+      const override = l.activeDesign === 'text' ? rowTextFor(row, l.id) : null;
+      if (override === null) return { design: layerDesign(l), rendered: renderedMap[l.id] ?? null };
+      const text = { ...l.text, text: override };
       const resolved = resolvePlacement(
         adapter,
         l.placement,
@@ -632,11 +655,18 @@ export function Configurator(props: ConfiguratorProps) {
         priceBreakdown(rowDesigns(r), teamVariant(r)?.price ?? 0, r.quantity, pricing),
       );
       const first = parts[0] ?? priceBreakdown(pricedDesigns, variant?.price ?? 0, 1, pricing);
-      return {
-        ...first,
-        quantity: parts.reduce((n, x) => n + x.quantity, 0),
-        total: parts.reduce((n, x) => n + x.total, 0),
-      };
+      // Undiscounted per row; the tier is chosen by the whole order's quantity.
+      const gross = (x: PriceBreakdown) => x.total + (x.bulkDiscount?.amount ?? 0);
+      return withBulkDiscount(
+        {
+          ...first,
+          quantity: parts.reduce((n, x) => n + x.quantity, 0),
+          total: parts.reduce((n, x) => n + gross(x), 0),
+          bulkDiscount: null,
+        },
+        parts.reduce((n, x) => n + x.basePrice * x.quantity, 0),
+        pricing,
+      );
     }
     return priceBreakdown(pricedDesigns, variant?.price ?? 0, state.product.quantity, pricing);
   })();
@@ -861,6 +891,49 @@ export function Configurator(props: ConfiguratorProps) {
     return out;
   };
 
+  /** Front (+ back when used) render of the garment as a JPEG for the order email and staff. */
+  const composeMockup = async (): Promise<Blob | null> => {
+    const viewer = viewerRef.current;
+    if (!viewer) return null;
+    const hasBack = state.layers.some(
+      (l) => getPreset(adapter, l.placement.positionId)?.surfaceId === 'back',
+    );
+    const shots = (hasBack ? (['front', 'back'] as const) : (['front'] as const))
+      .map((v) => viewer.captureCanvas(640, v))
+      .filter((c): c is HTMLCanvasElement => !!c);
+    if (!shots.length) return null;
+    const pad = 20;
+    const c = document.createElement('canvas');
+    c.width = shots.reduce((w, x) => w + x.width, 0) + pad * (shots.length + 1);
+    c.height = Math.max(...shots.map((x) => x.height)) + pad * 2;
+    const ctx = c.getContext('2d');
+    if (!ctx) return null;
+    ctx.fillStyle = '#f4f4f2'; // JPEG has no transparency; a soft studio grey
+    ctx.fillRect(0, 0, c.width, c.height);
+    let x = pad;
+    for (const shot of shots) {
+      ctx.drawImage(shot, x, pad);
+      x += shot.width + pad;
+    }
+    return new Promise((resolve) => c.toBlob((b) => resolve(b), 'image/jpeg', 0.86));
+  };
+
+  /**
+   * Saves a mockup and returns its URL; never blocks the order if it fails. `decals` swaps in
+   * other designs first (team rows); the caller restores the live designs afterwards.
+   */
+  const saveMockup = async (decals?: ReturnType<typeof decalsFor>): Promise<string | null> => {
+    if (!persistence.uploadMockup || !viewerRef.current) return null;
+    try {
+      if (decals) viewerRef.current.setDecals(decals);
+      const blob = await composeMockup();
+      return blob ? ((await persistence.uploadMockup(blob))?.url ?? null) : null;
+    } catch (e) {
+      console.warn('[embroidery] mockup skipped', e);
+      return null;
+    }
+  };
+
   const itemMeta = (variantTitle: string, price: number) => ({
     title: product.title,
     variantTitle,
@@ -873,7 +946,8 @@ export function Configurator(props: ConfiguratorProps) {
     setBusy('Saving design…');
     const config = buildConfiguration(stateRef.current, renderedMap, { layers });
     const { configRef } = await persistence.saveConfiguration(config);
-    const properties = buildLineItemProperties(config, { configRef });
+    const mockupUrl = await saveMockup();
+    const properties = buildLineItemProperties(config, { configRef, mockupUrl });
     const meta = itemMeta(variant?.title ?? '', variant?.price ?? 0);
     const fees = feeInputs(breakdown);
     setBusy(state.editing ? 'Updating cart…' : 'Adding to cart…');
@@ -927,7 +1001,10 @@ export function Configurator(props: ConfiguratorProps) {
   const submitTeam = async () => {
     const rowIssues = teamRows
       .map((r, i) => {
-        const e = teamRowError(r) ?? (personalizedLayer && !r.text.trim() ? 'Enter a name.' : null);
+        const e =
+          teamRowError(r) ??
+          (personalizedLayer && !r.text.trim() ? 'Enter a name.' : null) ??
+          (numberLayer && !/^\d{1,2}$/.test(r.number.trim()) ? 'Enter a number (0–99).' : null);
         return e ? `Row ${i + 1}: ${e}` : null;
       })
       .filter((x): x is string => !!x);
@@ -935,63 +1012,85 @@ export function Configurator(props: ConfiguratorProps) {
     const layers = await persistArtwork();
     const teamOrderId = createId();
     const inputs: AddItemInput[] = [];
+    // Each person's mockup shows their own name / number; rendered with a scratch rasterizer.
+    const scratch = new DesignRasterizer();
     let n = 0;
-    for (const row of teamRows) {
-      n += 1;
-      setBusy(`Saving ${n} of ${teamRows.length}…`);
-      const v = teamVariant(row)!;
-      const rowLayers = layers.map((l) =>
-        personalizedLayer && l.id === personalizedLayer.id
-          ? { ...l, text: { ...l.text, text: row.text.trim() } }
-          : l,
-      );
-      const rendered = { ...renderedMap };
-      for (const l of rowLayers) {
-        if (personalizedLayer && l.id === personalizedLayer.id) {
-          const resolved = resolvePlacement(
-            adapter,
-            l.placement,
-            rasterizerFor(l.id).measureTextSize(l.text),
-          );
-          rendered[l.id] = {
-            widthCm: resolved.widthCm,
-            heightCm: resolved.heightCm,
-            fitted: resolved.fitted,
-          };
+    try {
+      for (const row of teamRows) {
+        n += 1;
+        setBusy(`Saving ${n} of ${teamRows.length}…`);
+        const v = teamVariant(row)!;
+        const rowLayers = layers.map((l) => {
+          const override = l.activeDesign === 'text' ? rowTextFor(row, l.id) : null;
+          return override === null ? l : { ...l, text: { ...l.text, text: override } };
+        });
+        const rendered = { ...renderedMap };
+        for (const l of rowLayers) {
+          if (l.activeDesign === 'text' && rowTextFor(row, l.id) !== null) {
+            const resolved = resolvePlacement(
+              adapter,
+              l.placement,
+              rasterizerFor(l.id).measureTextSize(l.text),
+            );
+            rendered[l.id] = {
+              widthCm: resolved.widthCm,
+              heightCm: resolved.heightCm,
+              fitted: resolved.fitted,
+            };
+          }
         }
+        const rowState: EditorState = {
+          ...stateRef.current,
+          product: productSelection(
+            product,
+            v,
+            state.product.modelId,
+            state.product.modelUrl,
+            row.quantity,
+          ),
+        };
+        const config = buildConfiguration(rowState, rendered, {
+          layers: rowLayers,
+          configurationId: createId(),
+          teamOrderId,
+        });
+        const issuesForRow = validateConfiguration(adapter, config);
+        if (issuesForRow.length) throw new UserFacingError(`Row ${n}: ${issuesForRow[0]!.message}`);
+        const { configRef } = await persistence.saveConfiguration(config);
+        const rowBreakdown = priceBreakdown(rowDesigns(row), v.price, row.quantity, pricing);
+        const personal = rowLayers.some(
+          (l) => l.activeDesign === 'text' && rowTextFor(row, l.id) !== null,
+        );
+        const mockupUrl = await saveMockup(
+          personal
+            ? decalsFor(
+                rowLayers.map((l) =>
+                  l.activeDesign === 'text' && rowTextFor(row, l.id) !== null
+                    ? computeLayout(l, scratch)
+                    : (layoutOf(l.id) ?? { layerId: l.id, resolved: null, raster: null }),
+                ),
+                rowLayers,
+              )
+            : undefined,
+        );
+        inputs.push({
+          variantId: v.id,
+          quantity: row.quantity,
+          properties: buildLineItemProperties(config, {
+            configRef,
+            teamPosition: `${n} of ${teamRows.length}`,
+            mockupUrl,
+          }),
+          meta: {
+            ...itemMeta(v.title, v.price),
+            title: `${product.title}${row.text ? ` — ${row.text.trim()}` : ''}${row.number ? ` #${row.number.trim()}` : ''}`,
+          },
+          fees: feeInputs(rowBreakdown),
+        });
       }
-      const rowState: EditorState = {
-        ...stateRef.current,
-        product: productSelection(
-          product,
-          v,
-          state.product.modelId,
-          state.product.modelUrl,
-          row.quantity,
-        ),
-      };
-      const config = buildConfiguration(rowState, rendered, {
-        layers: rowLayers,
-        configurationId: createId(),
-        teamOrderId,
-      });
-      const issuesForRow = validateConfiguration(adapter, config);
-      if (issuesForRow.length) throw new UserFacingError(`Row ${n}: ${issuesForRow[0]!.message}`);
-      const { configRef } = await persistence.saveConfiguration(config);
-      const rowBreakdown = priceBreakdown(rowDesigns(row), v.price, row.quantity, pricing);
-      inputs.push({
-        variantId: v.id,
-        quantity: row.quantity,
-        properties: buildLineItemProperties(config, {
-          configRef,
-          teamPosition: `${n} of ${teamRows.length}`,
-        }),
-        meta: {
-          ...itemMeta(v.title, v.price),
-          title: `${product.title}${row.text ? ` — ${row.text.trim()}` : ''}`,
-        },
-        fees: feeInputs(rowBreakdown),
-      });
+    } finally {
+      // Put the live designs back on the garment.
+      viewerRef.current?.setDecals(decalsFor(layouts, stateRef.current.layers));
     }
     setBusy('Adding to cart…');
     await cart.addItems(inputs);
@@ -1102,6 +1201,33 @@ export function Configurator(props: ConfiguratorProps) {
         }}
       />
     ) : null;
+  const applyTemplate = (template: DesignTemplate, values: Record<string, string>) => {
+    const layers = templateLayers(adapter, template, values, {
+      allowed: settings.positionIds,
+      fontIds: settings.fontIds,
+      threadColorId: layer.text.threadColorId,
+      maxDesigns,
+    });
+    if (!layers.length) return;
+    for (const l of state.layers) releaseUrl(l.image?.previewUrl);
+    originals.current.clear();
+    dispatch({ type: 'applyTemplate', layers });
+    setStepError(null);
+    setToast({
+      tone: 'success',
+      message: `“${template.label}” applied. Edit any design below, or continue to placement.`,
+    });
+  };
+  const templatePicker = settings.templates ? (
+    <TemplatePicker
+      adapter={adapter}
+      templates={DESIGN_TEMPLATES.filter(
+        (t) =>
+          templateLayers(adapter, t, {}, { allowed: settings.positionIds, maxDesigns }).length > 0,
+      )}
+      onApply={applyTemplate}
+    />
+  ) : null;
   const reviewLayers: ReviewLayer[] = state.layers.map((l) => ({
     layerId: l.id,
     design: layerDesign(l),
@@ -1295,7 +1421,17 @@ export function Configurator(props: ConfiguratorProps) {
             {state.step === 1 ? (
               <DesignStep
                 key={layer.id}
-                header={layerBar}
+                header={
+                  <>
+                    {templatePicker}
+                    {layerBar}
+                  </>
+                }
+                maxTextSizeCm={Math.min(
+                  LIMITS.maxTextSizeCm,
+                  getPreset(adapter, layer.placement.positionId)?.maxHeightCm ??
+                    LIMITS.maxTextSizeCm,
+                )}
                 activeDesign={layer.activeDesign}
                 text={layer.text}
                 image={layer.image}
@@ -1348,7 +1484,22 @@ export function Configurator(props: ConfiguratorProps) {
                 canTeam={canTeam}
                 share={share}
                 onShare={() => void onShare()}
-                onOrderMode={setOrderMode}
+                onOrderMode={(m) => {
+                  setOrderMode(m);
+                  if (m !== 'team') return;
+                  // Start the first row from the design on screen (name + number).
+                  setTeamRows((rows) =>
+                    rows.length === 1 && !rows[0]!.text && !rows[0]!.number
+                      ? [
+                          {
+                            ...rows[0]!,
+                            text: personalizedLayer?.text.text.trim().split('\n')[0] ?? '',
+                            number: numberLayer?.text.text.trim() ?? '',
+                          },
+                        ]
+                      : rows,
+                  );
+                }}
                 teamPanel={
                   <TeamOrderPanel
                     product={product}
@@ -1357,7 +1508,8 @@ export function Configurator(props: ConfiguratorProps) {
                     personalizedLabel={
                       personalizedLayer ? layerTitle(adapter, personalizedLayer) : null
                     }
-                    personalizeOptions={textLayers.map((l) => ({
+                    numberLabel={numberLayer ? layerTitle(adapter, numberLayer) : null}
+                    personalizeOptions={nameCandidates.map((l) => ({
                       id: l.id,
                       label: getPreset(adapter, l.placement.positionId)?.label ?? '',
                     }))}

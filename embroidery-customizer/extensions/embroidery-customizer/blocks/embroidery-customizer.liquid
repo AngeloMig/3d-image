@@ -14,7 +14,8 @@
   data-module-src="{{ 'embroidery-configurator.js' | asset_url }}"
   {{ block.shopify_attributes }}
 >
-  {% render 'embroidery-config', p: p, s: block.settings %}
+  {%- assign default_model = block.settings.proxy_path | default: '/apps/embroidery' | append: '/model/tshirt-v1.glb' -%}
+  {% render 'embroidery-config', p: p, s: block.settings, default_model: default_model %}
   <div class="embroidery-customizer-block__placeholder" aria-hidden="true"></div>
   <p data-embroidery-fallback hidden>{{ 'embroidery.load_error' | t }}</p>
   <noscript>{{ 'embroidery.noscript' | t }}</noscript>
@@ -75,16 +76,18 @@
     { "type": "textarea", "id": "garment_colors", "label": "Garment colour map", "default": "Royal: original\nWhite: #f1f1ee\nBlack: #232325\nNavy: #24304f\nBeige: #d9c8a9", "info": "One per line: <colour option value>: <hex>. Use 'original' to keep the 3D model's own texture colour." },
     { "type": "header", "content": "3D model" },
     { "type": "checkbox", "id": "use_product_model", "label": "Use the product's 3D model media (GLB) when available", "default": true },
-    { "type": "text", "id": "model_url", "label": "Model URL override", "info": "Optional GLB URL (e.g. uploaded to Content → Files). Empty = bundled sample T-shirt." },
+    { "type": "text", "id": "model_url", "label": "Model URL override", "info": "Optional GLB URL (e.g. uploaded to Content → Files). Empty = the sample T-shirt served by the app." },
     { "type": "select", "id": "model_profile", "label": "Model calibration profile", "default": "tshirt-v1", "options": [
       { "value": "tshirt-v1", "label": "Classic T-shirt (sample model)" }
     ], "info": "Embroidery zones are calibrated per model. New garments need a new profile." },
     { "type": "header", "content": "Pricing & extra features" },
-    { "type": "product", "id": "fee_product", "label": "Embroidery fee product", "info": "Optional. A product with variants named after each fee: \"Text\", \"Logo\", \"Medium size\", \"Large size\", \"3D Puff\", \"Metallic thread\", \"Woven patch\", \"Chenille\", \"Premium font\". Their Shopify prices are shown live and added to the cart." },
+    { "type": "text", "id": "fee_product_handle", "label": "Embroidery fee product (handle)", "placeholder": "embroidery-fee", "info": "The handle of a product with variants named after each fee: Text, Logo, Medium size, Large size, 3D Puff, Metallic thread, Woven patch, Chenille, Premium font. Their Shopify prices are shown live and added to the cart." },
     { "type": "textarea", "id": "sample_prices", "label": "Sample add-on prices (preview only)", "default": "Text: 5\nLogo: 8\nMedium size: 3\nLarge size: 6\n3D Puff: 4\nMetallic thread: 3\nWoven patch: 6\nChenille: 7\nPremium font: 2", "info": "Shown only while no Embroidery fee product is selected, labelled 'not charged yet'. Amounts in your store currency. Clear it to hide prices." },
+    { "type": "textarea", "id": "bulk_tiers", "label": "Bulk discount tiers", "info": "One per line: <minimum items>: <% off garments>, e.g. 10: 10. Shown live in the customizer. Create matching automatic discounts in Discounts so Shopify charges them." },
     { "type": "range", "id": "max_designs", "label": "Designs per item", "min": 1, "max": 4, "step": 1, "default": 4, "info": "e.g. names and logos on both chests and the back. Overlapping spots can't be combined." },
     { "type": "checkbox", "id": "enable_team_orders", "label": "Allow team / bulk orders (a different name per shirt)", "default": true },
     { "type": "checkbox", "id": "enable_sharing", "label": "Allow saving and sharing designs by link", "default": true },
+    { "type": "checkbox", "id": "enable_templates", "label": "Offer ready-made design templates (team jersey, monogram…)", "default": true },
     { "type": "header", "content": "Behaviour" },
     { "type": "range", "id": "max_upload_mb", "label": "Max logo upload size", "min": 1, "max": 10, "step": 1, "unit": "MB", "default": 5 },
     { "type": "select", "id": "after_add", "label": "After adding to cart", "default": "stay", "options": [

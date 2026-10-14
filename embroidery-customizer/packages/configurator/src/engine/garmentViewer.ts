@@ -523,7 +523,11 @@ export class GarmentViewer {
     // Only the garment mesh(es); decal geometry is produced in world space.
     let geometry = null;
     for (const mesh of this.meshes) {
-      geometry = buildDecalGeometry(mesh, { position: point, quaternion, size }, this.worldPerCm * 0.04);
+      geometry = buildDecalGeometry(
+        mesh,
+        { position: point, quaternion, size },
+        this.worldPerCm * 0.04,
+      );
       if (geometry) break;
     }
     if (!geometry) return;
@@ -668,6 +672,15 @@ export class GarmentViewer {
 
   /** Snapshot of the current view as a data URL (used for review + cart thumbnails). */
   capture(maxSize = 360, view?: 'front' | 'back'): string | null {
+    try {
+      return this.captureCanvas(maxSize, view)?.toDataURL('image/webp', 0.85) ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Renders the garment from `view` into a new canvas (transparent background). */
+  captureCanvas(maxSize = 360, view?: 'front' | 'back'): HTMLCanvasElement | null {
     if (!this.model) return null;
     const saved = this.camera.position.clone();
     const tween = this.tween;
@@ -684,7 +697,7 @@ export class GarmentViewer {
       c.width = Math.round(src.width * scale);
       c.height = Math.round(src.height * scale);
       c.getContext('2d')?.drawImage(src, 0, 0, c.width, c.height);
-      return c.toDataURL('image/webp', 0.85);
+      return c;
     } catch {
       return null;
     } finally {
@@ -715,12 +728,15 @@ export class GarmentViewer {
 
   /** The design layer under the pointer (front-most surface wins), if any. */
   private decalUnderPointer(e: PointerEvent): string | null {
-    const meshes = [...this.decals.values()].map((d) => d.mesh).filter((m): m is Mesh => !!m?.visible);
+    const meshes = [...this.decals.values()]
+      .map((d) => d.mesh)
+      .filter((m): m is Mesh => !!m?.visible);
     if (!meshes.length) return null;
     this.pointerRay(e);
     const garment = this.raycaster.intersectObjects(this.meshes, false)[0];
     const decal = this.raycaster.intersectObjects(meshes, false)[0];
-    if (!decal || (garment && decal.distance > garment.distance + this.worldPerCm * 0.5)) return null;
+    if (!decal || (garment && decal.distance > garment.distance + this.worldPerCm * 0.5))
+      return null;
     return (decal.object.userData.layerId as string | undefined) ?? null;
   }
 

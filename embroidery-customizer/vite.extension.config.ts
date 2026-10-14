@@ -2,8 +2,9 @@
  * Builds the storefront bundle for the Shopify theme app extension:
  *   embroidery-loader.js        tiny bootstrapper (included by the Liquid block / app embed)
  *   embroidery-configurator.js  Preact + Three.js configurator, lazy-imported by the loader
- *   embroidery-*.woff2          embroidery fonts (resolved relative to the module URL)
- * Theme app extension assets are a flat folder, so names are fixed and prefixed.
+ *   embroidery-chunk-<font>.js  each embroidery font as a lazy data: URL module
+ * Theme app extension assets are a flat folder that only accepts .js/.css/.json/images, so
+ * fonts ship inside JS chunks and the 3D model is served by the app (/apps/embroidery/model).
  */
 import { defineConfig } from 'vite';
 import preact from '@preact/preset-vite';

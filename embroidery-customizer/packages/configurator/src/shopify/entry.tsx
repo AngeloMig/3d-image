@@ -7,6 +7,7 @@ import { useEffect, useRef, useState } from 'preact/hooks';
 import {
   LIMITS,
   feeCodeForVariantTitle,
+  parseBulkTiers,
   getModelAdapter,
   type PlacementId,
   type PricingSettings,
@@ -35,6 +36,8 @@ export interface BlockData {
   modelUrl: string;
   modelId?: string;
   proxyPath: string;
+  /** The shop's primary URL (https://shop.com), for absolute links in order emails. */
+  shopUrl?: string;
   display?: 'inline' | 'button';
   buttonLabel?: string;
   syncThemeVariant?: boolean;
@@ -42,12 +45,15 @@ export interface BlockData {
   feeVariants?: { title: string; price: number; id: string | number; available?: boolean }[] | null;
   /** Preview-only prices ("Logo: 8" per line, store currency) used when no fee product is set. */
   samplePrices?: string | null;
+  /** "10: 10" per line → order 10+ items, save 10% (charged by Shopify automatic discounts). */
+  bulkTiers?: string | null;
   settings?: {
     theme?: string;
     themeSwitcher?: boolean;
     maxDesigns?: number;
     teamOrders?: boolean;
     sharing?: boolean;
+    templates?: boolean;
     heading?: string;
     subtitle?: string;
     defaultText?: string;
@@ -103,6 +109,7 @@ function toSettings(data: BlockData): Partial<ConfiguratorSettings> {
     settings.maxDesigns = Math.max(1, Math.min(LIMITS.maxDesigns, s.maxDesigns));
   if (typeof s.teamOrders === 'boolean') settings.teamOrders = s.teamOrders;
   if (typeof s.sharing === 'boolean') settings.sharing = s.sharing;
+  if (typeof s.templates === 'boolean') settings.templates = s.templates;
   return settings;
 }
 
@@ -110,8 +117,10 @@ function toSettings(data: BlockData): Partial<ConfiguratorSettings> {
 export function toPricing(
   variants: BlockData['feeVariants'],
   samplePrices?: string | null,
+  bulkTiers?: string | null,
 ): PricingSettings {
   const fees: PricingSettings['fees'] = {};
+  const tiers = parseBulkTiers(bulkTiers);
   if (!variants?.length && samplePrices) {
     // Display-only: variantId null → shown with a "not charged" note, never added to the cart.
     for (const line of samplePrices.split(/\n|,/)) {
@@ -123,14 +132,14 @@ export function toPricing(
           variantId: null,
         };
     }
-    return { fees };
+    return { fees, bulkTiers: tiers };
   }
   for (const v of variants ?? []) {
     const code = feeCodeForVariantTitle(v.title);
     if (code && v.available !== false)
       fees[code] = { price: Math.max(0, Number(v.price) || 0), variantId: String(v.id) };
   }
-  return { fees };
+  return { fees, bulkTiers: tiers };
 }
 
 /** Build configurator props for a block; without a product it runs as a labelled demo. */
@@ -159,8 +168,10 @@ export async function buildProps(data: BlockData): Promise<ConfiguratorProps> {
     product: fromShopifyProduct(data.product, data.currency, data.locale),
     initialVariantId: data.selectedVariantId ? String(data.selectedVariantId) : null,
     cart: new ShopifyCartAdapter({ root: data.root }),
-    persistence: new FallbackPersistence(new AppProxyPersistence(data.proxyPath)),
-    pricing: toPricing(data.feeVariants, data.samplePrices),
+    persistence: new FallbackPersistence(
+      new AppProxyPersistence(data.proxyPath, undefined, data.shopUrl || location.origin),
+    ),
+    pricing: toPricing(data.feeVariants, data.samplePrices, data.bulkTiers),
     sharedDesignRef,
     settings,
   };

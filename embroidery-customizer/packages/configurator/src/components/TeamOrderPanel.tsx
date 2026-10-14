@@ -5,7 +5,10 @@ import { Choice, Notice } from './controls';
 export interface TeamRow {
   id: string;
   size: string;
+  /** Per-person name (personalized design). */
   text: string;
+  /** Jersey number (number design), digits only. */
+  number: string;
   quantity: number;
 }
 
@@ -19,18 +22,32 @@ interface Props {
   personalizeOptions: { id: string; label: string }[];
   personalizedId: string | null;
   onPersonalize: (id: string) => void;
+  /** Label of the design that carries each person's jersey number, if any. */
+  numberLabel: string | null;
   /** Functional update so rapid edits (fast typing, paste) never overwrite each other. */
   onChange: (update: (rows: TeamRow[]) => TeamRow[]) => void;
   rowError: (row: TeamRow) => string | null;
 }
 
 let seq = 0;
-export const newTeamRow = (size: string, text = ''): TeamRow => ({
+export const newTeamRow = (size: string, text = '', number = ''): TeamRow => ({
   id: `r${++seq}${Date.now().toString(36)}`,
   size,
   text,
+  number,
   quantity: 1,
 });
+
+/** Next unused jersey number after the highest one so far ("" when numbers aren't used). */
+export function nextJerseyNumber(rows: TeamRow[]): string {
+  const used = rows
+    .filter((r) => r.number !== '')
+    .map((r) => Number(r.number))
+    .filter((n) => Number.isFinite(n) && n >= 0 && n <= 99);
+  if (!rows.some((r) => r.number !== '')) return '';
+  const next = (used.length ? Math.max(...used) : 0) + 1;
+  return next > 99 ? '' : String(next);
+}
 
 /**
  * Team / bulk orders: one shared design, a different name (and size) per row.
@@ -57,16 +74,27 @@ export function TeamOrderPanel(p: Props) {
       ) : null}
       {p.personalizedLabel ? (
         <p class="emb-field__hint">
-          Each row gets its own name on <strong>{p.personalizedLabel}</strong>. Other designs stay
-          the same on every shirt.
+          Each row gets its own name on <strong>{p.personalizedLabel}</strong>
+          {p.numberLabel ? (
+            <>
+              {' '}
+              and number on <strong>{p.numberLabel}</strong>
+            </>
+          ) : null}
+          . Other designs stay the same on every shirt.
         </p>
       ) : (
         <Notice tone="warn">Add a text design to personalize each shirt with a name.</Notice>
       )}
-      <div class="emb-team__table" role="table" aria-label="Team order">
+      <div
+        class={`emb-team__table${p.numberLabel ? ' has-number' : ''}`}
+        role="table"
+        aria-label="Team order"
+      >
         <div class="emb-team__row emb-team__row--head" role="row">
           {sizes.length ? <span role="columnheader">Size</span> : null}
           <span role="columnheader">Name / text</span>
+          {p.numberLabel ? <span role="columnheader">No.</span> : null}
           <span role="columnheader">Qty</span>
           <span role="columnheader" class="emb-sr-only">
             Remove
@@ -75,7 +103,10 @@ export function TeamOrderPanel(p: Props) {
         {p.rows.map((row, i) => {
           const error =
             p.rowError(row) ??
-            (p.personalizedLabel ? (validateText(row.text)[0]?.message ?? null) : null);
+            (p.personalizedLabel ? (validateText(row.text)[0]?.message ?? null) : null) ??
+            (p.numberLabel && row.number !== '' && !/^\d{1,2}$/.test(row.number)
+              ? 'Numbers go from 0 to 99.'
+              : null);
           return (
             <div key={row.id} class="emb-team__entry" data-testid="team-row">
               <div class="emb-team__row" role="row">
@@ -107,6 +138,23 @@ export function TeamOrderPanel(p: Props) {
                     update(row.id, { text: (e.currentTarget as HTMLInputElement).value })
                   }
                 />
+                {p.numberLabel ? (
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    maxLength={2}
+                    aria-label={`Number for row ${i + 1}`}
+                    placeholder="#"
+                    value={row.number}
+                    data-testid="team-number"
+                    onInput={(e) => {
+                      const v = (e.currentTarget as HTMLInputElement).value.replace(/\D+/g, '');
+                      (e.currentTarget as HTMLInputElement).value = v;
+                      update(row.id, { number: v });
+                    }}
+                  />
+                ) : null}
                 <input
                   type="number"
                   min={1}
@@ -132,7 +180,9 @@ export function TeamOrderPanel(p: Props) {
                   <IconClose />
                 </button>
               </div>
-              {error && row.text !== '' ? <p class="emb-field__error">{error}</p> : null}
+              {error && (row.text !== '' || row.number !== '') ? (
+                <p class="emb-field__error">{error}</p>
+              ) : null}
             </div>
           );
         })}
@@ -143,7 +193,10 @@ export function TeamOrderPanel(p: Props) {
           class="emb-btn emb-btn--secondary emb-btn--sm"
           disabled={p.rows.length >= LIMITS.maxTeamRows}
           onClick={() =>
-            p.onChange((rows) => [...rows, newTeamRow(rows.at(-1)?.size ?? sizes[0] ?? '')])
+            p.onChange((rows) => [
+              ...rows,
+              newTeamRow(rows.at(-1)?.size ?? sizes[0] ?? '', '', nextJerseyNumber(rows)),
+            ])
           }
           data-testid="team-add-row"
         >

@@ -40,6 +40,18 @@ export function PriceBar(p: { breakdown: PriceBreakdown; currency: string; local
             <span>× {b.quantity} items</span>
           </li>
         ) : null}
+        {b.bulkDiscount ? (
+          <li class="is-saving" data-testid="bulk-saving">
+            <span>Bulk saving ({b.bulkDiscount.percentOff}% off garments)</span>
+            <b>−{m(b.bulkDiscount.amount)}</b>
+          </li>
+        ) : null}
+        {b.nextBulkTier && b.quantity > 1 ? (
+          <li class="is-nudge" data-testid="bulk-nudge">
+            Add {b.nextBulkTier.more} more {b.nextBulkTier.more === 1 ? 'item' : 'items'} to save{' '}
+            {b.nextBulkTier.percentOff}% on garments
+          </li>
+        ) : null}
       </ul>
       <div class="emb-pricebar__total">
         <span class="emb-pricebar__label">

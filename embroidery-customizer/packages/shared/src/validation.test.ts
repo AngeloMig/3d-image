@@ -100,12 +100,27 @@ describe('placement validation', () => {
 describe('multi-design validation', () => {
   it('rejects two designs on the same position and prefixes messages per design', async () => {
     const { createConfiguration, createLayer } = await import('./configuration');
-    const product = { productId: '1', variantId: '2', options: {}, quantity: 1, modelId: TSHIRT_V1.id, modelUrl: 'm' };
+    const product = {
+      productId: '1',
+      variantId: '2',
+      options: {},
+      quantity: 1,
+      modelId: TSHIRT_V1.id,
+      modelUrl: 'm',
+    };
     const c = createConfiguration(TSHIRT_V1, product, {
-      layers: [createLayer(TSHIRT_V1, 'left_chest'), createLayer(TSHIRT_V1, 'left_chest', { ...DEFAULT_TEXT_DESIGN, text: '' })],
+      layers: [
+        createLayer(TSHIRT_V1, 'left_chest'),
+        createLayer(TSHIRT_V1, 'left_chest', { ...DEFAULT_TEXT_DESIGN, text: '' }),
+      ],
     });
     const { validateConfiguration } = await import('./validation');
     const messages = validateConfiguration(TSHIRT_V1, c).map((i) => i.message);
-    expect(messages).toEqual(expect.arrayContaining(['Design 2: Enter the text you want embroidered.', 'Design 2: Two designs can’t use the same position.']));
+    expect(messages).toEqual(
+      expect.arrayContaining([
+        'Design 2: Enter the text you want embroidered.',
+        'Design 2: Two designs can’t use the same position.',
+      ]),
+    );
   });
 });

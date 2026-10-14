@@ -31,3 +31,17 @@ Legend: `[x]` done and verified locally · `[~]` implemented, needs a real Shopi
 - [x] orders/create linking + retention cleanup (unit-tested)
 - [~] Real packing slip + order on a dev store
 - [x] Homepage section in the host theme (on request); header/footer placeholders switched to Default
+
+## Phase 5 — client feature round (2026-10-14)
+- [~] 1. Mockup image on the order: stored per line (`_Embroidery Mockup`), shown in the app; email snippet in `notifications/` (needs pasting into the Order confirmation template)
+- [x] 3. Ready-made design templates (6 templates, fill-in fields, editable after)
+- [x] 5. Team jerseys: name + number per row, auto-numbering, per-person mockups
+- [~] 6. Logo approval queue in the app + order tags (verify on the dev store with a real order)
+- [~] 8. Bulk discount tiers shown live; create matching Shopify automatic discounts to charge them
+
+## Backlog — noted for later (not started)
+- 2. More garments: hoodie, polo, cap, tote — each needs its own GLB + placement calibration
+- 4. Sleeve and back-neck placement (needs sleeve calibration on the current model)
+- 7. "See it on a person": model photo / AR quick look on phones
+- 9. Gift options: gift wrap, gift message, hide prices on the packing slip
+- 10. Save designs to the customer account and one-click reorder

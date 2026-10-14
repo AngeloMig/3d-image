@@ -23,7 +23,8 @@
         "design_theme": "sport",
         "thread_colors": "",
         "sample_prices": "Text: 5\nLogo: 8\nMedium size: 3\nLarge size: 6\n3D Puff: 4\nMetallic thread: 3\nWoven patch: 6\nChenille: 7\nPremium font: 2",
-        "show_style_switcher": true
+        "show_style_switcher": true,
+        "bulk_tiers": "10: 10\n25: 15\n50: 20"
       }
     }
   },

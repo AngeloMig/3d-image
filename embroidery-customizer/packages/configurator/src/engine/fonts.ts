@@ -1,14 +1,17 @@
 import { FONTS, type FontOption } from '@embroidery/shared';
 
-const fontUrls = import.meta.glob<string>('../assets/fonts/*.woff2', {
-  eager: true,
-  query: '?url',
+/**
+ * Each font is its own lazy JS chunk exporting a data: URL. Shopify theme app extensions only
+ * accept .js/.css/.json/image assets (no .woff2), and a font is fetched only when it's needed.
+ */
+const fontModules = import.meta.glob<string>('../assets/fonts/*.woff2', {
+  query: '?inline',
   import: 'default',
 });
 
-export function fontFileUrl(file: string): string | null {
-  const entry = Object.entries(fontUrls).find(([path]) => path.endsWith(`/${file}`));
-  return entry ? new URL(entry[1], import.meta.url).href : null;
+export async function fontFileUrl(file: string): Promise<string | null> {
+  const entry = Object.entries(fontModules).find(([path]) => path.endsWith(`/${file}`));
+  return entry ? entry[1]() : null;
 }
 
 export type FontStatus = 'loading' | 'loaded' | 'fallback';
@@ -28,10 +31,10 @@ export function ensureFont(font: FontOption, timeoutMs = 5000): Promise<FontStat
   const existing = pending.get(font.id);
   if (existing) return existing;
   const job = (async (): Promise<FontStatus> => {
-    const url = fontFileUrl(font.file);
-    if (typeof FontFace === 'undefined' || typeof document === 'undefined' || !url)
-      return 'fallback';
+    if (typeof FontFace === 'undefined' || typeof document === 'undefined') return 'fallback';
     try {
+      const url = await fontFileUrl(font.file);
+      if (!url) return 'fallback';
       const face = new FontFace(font.family, `url(${JSON.stringify(url)}) format("woff2")`, {
         weight: String(font.weight),
         style: 'normal',
@@ -83,9 +86,10 @@ export function ensureUiFont(theme: 'clean' | 'atelier' | 'sport' = 'clean'): Pr
   let job = uiFonts.get(family);
   if (!job) {
     job = (async () => {
-      const url = fontFileUrl(file);
-      if (!url || typeof FontFace === 'undefined' || typeof document === 'undefined') return;
+      if (typeof FontFace === 'undefined' || typeof document === 'undefined') return;
       try {
+        const url = await fontFileUrl(file);
+        if (!url) return;
         const face = new FontFace(family, `url(${JSON.stringify(url)}) format("woff2")`, {
           weight,
           display: 'swap',

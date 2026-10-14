@@ -141,6 +141,55 @@ those Shopify prices, and the fees are added as separate cart lines tied to the 
 `_Embroidery Fee For` property). Removing a shirt or changing its quantity in the cart keeps the
 fee lines in sync. Size tiers are defined in `packages/shared/src/pricing.ts` (`SIZE_TIERS`).
 
+In the **app block**, Shopify allows only one product picker, so enter the fee product's **handle**
+(e.g. `embroidery-fee`) in *Embroidery fee product (handle)*. The theme section has a picker.
+
+### Bulk discount tiers
+
+Set *Bulk discount tiers* in the block/section, one per line: `10: 10` (10+ items → 10% off),
+`25: 15`, `50: 20`. The customizer shows the saving live and nudges ("add 3 more to save 10%"),
+counting every shirt in a team order. **Shopify charges it only if matching automatic discounts
+exist:** *Discounts → Create discount → Amount off products → Automatic*, percentage, applies to the
+customized T-shirt product only, minimum quantity of items = the tier's quantity. Create one per
+tier; Shopify applies the best one. Fee lines are not discounted (the live price says "off
+garments" for that reason).
+
+### Design templates
+
+Ready-made layouts (team jersey, classic name, est. year, monogram, company staff, party crew) are
+defined in `packages/shared/src/templates.ts`. Customers fill in a few fields and get every design
+placed; they can edit everything afterwards. Turn them off with *Offer ready-made design templates*.
+
+### Team jerseys: names and numbers
+
+In a team order, each row has a name and (when the design includes a number, e.g. the *Team jersey*
+template) a jersey number. Each person becomes their own cart line with their own name/number,
+mockup and fees. New rows count up from the last number.
+
+### Mockup in the order email
+
+Every customized line gets a hidden `_Embroidery Mockup` property: an absolute URL
+(`https://<shop>/apps/embroidery/preview/pv_….jpg`) of the 3D preview (front, plus back when used),
+stored by the app. Team orders get one mockup per person. To show it in the confirmation email,
+paste `notifications/order-confirmation-mockup.liquid` into *Settings → Notifications → Order
+confirmation → Edit code*, inside the line-item loop. Staff see the same mockup in the app.
+
+### Logo approval
+
+Every ordered design with an uploaded logo is queued in the app under **Logo approvals**. Staff see
+the mockup and the original artwork, then **Approve** or **Request changes** (with a note). Orders
+are tagged `logo-review` → `logo-approved` / `logo-changes-requested` (needs the `write_orders`
+scope) so they can be filtered in *Orders*. The customer is told on the storefront and in the email
+that logos are checked before stitching; contact them from the order page when changes are needed
+(automatic customer emails would need an email service and are not included).
+
+### Theme app extension asset rules
+
+Shopify accepts only `.js/.css/.json/.png/.jpg/.svg/.wasm` in theme app extension assets, so the
+build ships each font as a lazy JS module (data URL) and the app serves the default 3D model at
+`/apps/embroidery/model/tshirt-v1.glb`. A product's own 3D model media still takes priority.
+`npm run extension:build` fails if a disallowed file type ends up in the assets folder.
+
 ### C. Packing slips
 
 *Settings → Shipping and delivery → Packing slips → Edit template*: paste

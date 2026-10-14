@@ -39,6 +39,12 @@ test('Shopify path: lazy loader mounts, adds real variant with properties, edits
     'Thread Color': 'White',
   });
   expect(body.items[0]!.properties['_Embroidery Config Ref']).toMatch(/^cfg_/);
+  // a 3D mockup (front view) is stored for the order email, linked by an absolute URL
+  const mockupUrl = body.items[0]!.properties['_Embroidery Mockup']!;
+  expect(mockupUrl).toMatch(/^https?:\/\/[^/]+\/apps\/embroidery\/preview\/pv_[a-f0-9]+\.jpg$/);
+  const mockup = await page.request.get(new URL(mockupUrl).pathname);
+  expect(mockup.ok()).toBe(true);
+  expect((await mockup.body()).subarray(0, 3)).toEqual(Buffer.from([0xff, 0xd8, 0xff])); // JPEG
   // the text embroidery fee rides along as its own line, priced by Shopify (variant 9001)
   expect(body.items[1]).toMatchObject({
     id: 9001,

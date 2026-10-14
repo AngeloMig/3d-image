@@ -10,6 +10,7 @@ export default tseslint.config(
       '**/node_modules/**',
       'extensions/*/assets/**',
       '.react-router/**',
+      '.shopify/**',
       'playwright-report/**',
       'test-results/**',
       'prisma/**',

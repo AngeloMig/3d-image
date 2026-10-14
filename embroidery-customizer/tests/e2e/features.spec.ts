@@ -165,3 +165,39 @@ test('live price on every step reacts to size, font, style and an added logo', a
   await expect.poll(money).toBe(start + 6 + 2 + 4 + 8 + 6);
   await expect.poll(async () => (await viewerState(page, HOST)).decals?.length).toBe(2);
 });
+
+test('team jersey template: name + number per person, bulk saving from 10 shirts', async ({
+  page,
+}) => {
+  await page.getByTestId('step-2').click();
+  await page.getByTestId('templates').locator('summary').click();
+  await page.getByTestId('template-team-jersey').click();
+  await page.getByTestId('template-field-team').fill('hawks');
+  await expect(page.getByTestId('template-field-team')).toHaveValue('HAWKS');
+  await page.getByTestId('template-field-name').fill('Sam');
+  await page.getByTestId('template-field-number').fill('7');
+  await page.getByTestId('template-apply').click();
+  // chest team name + back name + back number, all stitched on the garment
+  await expect.poll(async () => (await viewerState(page, HOST)).decals?.length).toBe(3);
+
+  await page.getByTestId('step-4').click();
+  await expect(page.getByTestId('review-summary')).toContainText('HAWKS');
+  await page.getByTestId('order-mode').getByRole('radio', { name: 'Team / bulk order' }).click();
+  // the first row starts from the design on screen; new rows count up from its number
+  await expect(page.getByTestId('team-text').nth(0)).toHaveValue('SAM');
+  await expect(page.getByTestId('team-number').nth(0)).toHaveValue('7');
+  await expect(page.getByTestId('summary-bulk-nudge')).toContainText('Order 10+ items');
+  for (let i = 0; i < 9; i++) await page.getByTestId('team-add-row').click();
+  await expect(page.getByTestId('team-number').nth(9)).toHaveValue('16');
+  await expect(page.getByTestId('summary-bulk-saving')).toContainText('10% off garments');
+  await expect(page.getByTestId('price-bar-total')).toBeVisible();
+
+  const names = page.getByTestId('team-text');
+  for (let i = 1; i < 10; i++) await names.nth(i).fill(`PLAYER${i}`);
+  await page.getByTestId('add-to-cart').click();
+  await expect(page.getByTestId('cart-count')).toHaveText('10');
+  await page.getByTestId('open-cart').click();
+  const lines = page.getByTestId('cart-line');
+  await expect(lines.nth(0)).toContainText('SAM #7');
+  await expect(lines.nth(3)).toContainText('PLAYER3 #10');
+});

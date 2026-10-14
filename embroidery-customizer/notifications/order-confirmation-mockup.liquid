@@ -1,0 +1,24 @@
+{%- comment -%}
+  Embroidery mockup for the ORDER CONFIRMATION email.
+  Install: Settings → Notifications → Customer notifications → Order confirmation → Edit code.
+  Paste this INSIDE the line-item loop (`{% for line in subtotal_line_items %}` in Shopify's
+  default template), right after the product title/variant. It shows the 3D preview the
+  customer saw (front + back) and a note that logos are checked before stitching.
+  The image is served by the Embroidery app through the shop's own domain.
+{%- endcomment -%}
+{%- assign emb_mockup = line.properties['_Embroidery Mockup'] -%}
+{%- if emb_mockup != blank -%}
+  <div class="embroidery-mockup" style="margin: 8px 0 4px;">
+    <img
+      src="{{ emb_mockup }}"
+      alt="Your embroidery preview"
+      width="280"
+      style="display: block; width: 100%; max-width: 280px; height: auto; border-radius: 6px; border: 1px solid #e5e5e5;"
+    >
+    {%- if line.properties['Embroidery Type'] contains 'Logo' or line.properties['Design 2 – Type'] contains 'Logo' or line.properties['Design 3 – Type'] contains 'Logo' or line.properties['Design 4 – Type'] contains 'Logo' -%}
+      <p style="margin: 6px 0 0; font-size: 12px; color: #616161;">
+        Our team checks your logo before stitching and will contact you if anything needs changing.
+      </p>
+    {%- endif -%}
+  </div>
+{%- endif -%}

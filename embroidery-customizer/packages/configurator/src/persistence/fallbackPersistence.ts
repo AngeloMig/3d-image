@@ -39,13 +39,27 @@ export class FallbackPersistence implements PersistenceAdapter {
     try {
       return await this.primary.saveConfiguration(config);
     } catch (e) {
-      if (!FallbackPersistence.unreachable(e) || config.layers.some((l) => l.design.type !== 'text')) throw e;
+      if (
+        !FallbackPersistence.unreachable(e) ||
+        config.layers.some((l) => l.design.type !== 'text')
+      )
+        throw e;
       console.warn(
         '[embroidery] App proxy unreachable — keeping this text design in the browser only.',
         e,
       );
       const { configRef } = await this.local.saveConfiguration(config);
       return { configRef: `local:${configRef}` };
+    }
+  }
+
+  /** Mockups are a nice-to-have: any failure just leaves the order without one. */
+  async uploadMockup(image: Blob): Promise<{ url: string } | null> {
+    try {
+      return (await this.primary.uploadMockup?.(image)) ?? null;
+    } catch (e) {
+      console.warn('[embroidery] mockup not saved', e);
+      return null;
     }
   }
 

@@ -203,6 +203,25 @@ export function mockShopify() {
         state.artwork.set(storageRef, { bytes, type: check.mime!, filename: file.name });
         return send(res, 201, { storageRef });
       }
+      if (path === '/apps/embroidery/preview' && req.method === 'POST') {
+        const request = new Request(`http://localhost${req.url}`, {
+          method: 'POST',
+          headers: req.headers as HeadersInit,
+          body: Readable.toWeb(req) as unknown as BodyInit,
+          duplex: 'half',
+        } as RequestInit);
+        const file = (await request.formData()).get('file');
+        if (!(file instanceof File)) return send(res, 400, { error: 'Missing file.' });
+        const bytes = Buffer.from(await file.arrayBuffer());
+        const previewRef = `pv_${randomUUID().replace(/-/g, '').slice(0, 24)}`;
+        state.artwork.set(previewRef, { bytes, type: file.type || 'image/jpeg', filename: 'mockup.jpg' });
+        return send(res, 201, { previewRef });
+      }
+      const preview = path.match(/^\/apps\/embroidery\/preview\/(pv_[a-f0-9]+)\.jpg$/);
+      if (preview && req.method === 'GET') {
+        const a = state.artwork.get(preview[1]!);
+        return a ? send(res, 200, a.bytes, a.type) : send(res, 404, { error: 'Not found' });
+      }
       const art = path.match(/^\/apps\/embroidery\/artwork\/([\w-]+)$/);
       if (art && req.method === 'GET') {
         const a = state.artwork.get(art[1]!);

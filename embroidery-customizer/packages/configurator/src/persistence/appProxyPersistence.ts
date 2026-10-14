@@ -18,6 +18,8 @@ export class AppProxyPersistence implements PersistenceAdapter {
   constructor(
     proxyPath: string,
     private readonly fetchImpl: typeof fetch = (...a) => globalThis.fetch(...a),
+    /** Shop's public URL (e.g. https://shop.com); mockup links in emails must be absolute. */
+    private readonly publicOrigin: string = typeof location === 'undefined' ? '' : location.origin,
   ) {
     this.base = proxyPath.replace(/\/$/, '');
   }
@@ -45,6 +47,14 @@ export class AppProxyPersistence implements PersistenceAdapter {
     form.append('file', file, meta.filename);
     const res = await this.json<{ storageRef: string }>('/artwork', { method: 'POST', body: form });
     return { storageRef: res.storageRef };
+  }
+
+  async uploadMockup(image: Blob): Promise<{ url: string }> {
+    const form = new FormData();
+    form.append('file', image, 'mockup.jpg');
+    const res = await this.json<{ previewRef: string }>('/preview', { method: 'POST', body: form });
+    const origin = this.publicOrigin.replace(/\/$/, '');
+    return { url: `${origin}${this.base}/preview/${res.previewRef}.jpg` };
   }
 
   async saveConfiguration(config: EmbroideryConfiguration): Promise<{ configRef: string }> {

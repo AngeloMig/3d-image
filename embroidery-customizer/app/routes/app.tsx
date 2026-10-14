@@ -19,6 +19,7 @@ export default function App() {
     <AppProvider apiKey={apiKey}>
       <s-app-nav>
         <s-link href="/app">Embroidery designs</s-link>
+        <s-link href="/app/approvals">Logo approvals</s-link>
       </s-app-nav>
       <Outlet />
     </AppProvider>

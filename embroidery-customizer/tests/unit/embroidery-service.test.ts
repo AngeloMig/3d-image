@@ -19,11 +19,25 @@ function fakeDb() {
     Object.entries(where).every(([k, v]) => {
       if (v && typeof v === 'object' && 'lt' in (v as object))
         return (row[k] as Date) < (v as { lt: Date }).lt;
+      if (v && typeof v === 'object' && 'not' in (v as object)) {
+        const not = (v as { not: unknown }).not;
+        return not === null ? row[k] !== null && row[k] !== undefined : row[k] !== not;
+      }
+      if (v && typeof v === 'object' && 'in' in (v as object))
+        return (v as { in: unknown[] }).in.includes(row[k]);
       return row[k] === v || (v === null && (row[k] === null || row[k] === undefined));
     });
   const model = (name: string) => ({
     create: async ({ data }: { data: Record<string, unknown> }) => {
-      const row = { id: `id${++n}`, createdAt: new Date(), orderedAt: null, ...data } as Row;
+      // Mirrors the Prisma schema defaults the service relies on.
+      const defaults = name === 'artwork' ? { kind: 'artwork' } : {};
+      const row = {
+        id: `id${++n}`,
+        createdAt: new Date(),
+        orderedAt: null,
+        ...defaults,
+        ...data,
+      } as Row;
       tables[name]!.push(row);
       return row;
     },
@@ -134,7 +148,15 @@ describe('embroidery service', () => {
 
     const bad: EmbroideryConfiguration = {
       ...text,
-      layers: [{ ...text.layers[0]!, design: { ...text.layers[0]!.design, text: '' } as EmbroideryConfiguration['layers'][0]['design'] }],
+      layers: [
+        {
+          ...text.layers[0]!,
+          design: {
+            ...text.layers[0]!.design,
+            text: '',
+          } as EmbroideryConfiguration['layers'][0]['design'],
+        },
+      ],
     };
     await expect(svc.saveConfiguration(SHOP, serializeConfiguration(bad))).rejects.toBeInstanceOf(
       EmbroideryError,
@@ -213,5 +235,100 @@ describe('embroidery service', () => {
     expect(await svc.readArtwork(SHOP, storageRef)).not.toBeNull();
     expect(await svc.readArtwork(SHOP, abandoned.storageRef)).toBeNull();
     expect(storage.keys()).toHaveLength(1);
+  });
+
+  it('stores mockups separately from artwork and only serves them as mockups', async () => {
+    const { svc } = setup();
+    const { previewRef } = await svc.storeMockup(
+      SHOP,
+      new File([PNG], 'mockup.png', { type: 'image/png' }),
+    );
+    expect(previewRef).toMatch(/^pv_[a-f0-9]{24}$/);
+    expect(await svc.readArtwork(SHOP, previewRef, 'mockup')).not.toBeNull();
+    // A mockup ref never resolves as customer artwork (and vice versa).
+    expect(await svc.readArtwork(SHOP, previewRef)).toBeNull();
+    await expect(
+      svc.storeMockup(SHOP, new File(['<svg/>'], 'x.png', { type: 'image/png' })),
+    ).rejects.toMatchObject({ status: 415 });
+  });
+
+  it('queues ordered logo designs for approval and links the mockup to the order', async () => {
+    const { svc, tables } = setup();
+    const { storageRef } = await svc.storeArtwork(
+      SHOP,
+      new File([PNG], 'logo.png', { type: 'image/png' }),
+    );
+    const { previewRef } = await svc.storeMockup(
+      SHOP,
+      new File([PNG], 'mockup.png', { type: 'image/png' }),
+    );
+    const logo = createConfiguration(TSHIRT_V1, product, {
+      design: {
+        type: 'image',
+        storageRef,
+        previewUrl: null,
+        originalFilename: 'logo.png',
+        mimeType: 'image/png',
+        byteSize: 16,
+        widthPx: 100,
+        heightPx: 100,
+        scale: 0.5,
+      },
+    });
+    const text = createConfiguration(TSHIRT_V1, product);
+    const a = await svc.saveConfiguration(SHOP, serializeConfiguration(logo));
+    const b = await svc.saveConfiguration(SHOP, serializeConfiguration(text));
+    const rows = tables.embroideryConfiguration!;
+    expect(rows.find((r) => r.configRef === a.configRef)?.approvalStatus).toBe('pending');
+    expect(rows.find((r) => r.configRef === b.configRef)?.approvalStatus).toBeNull();
+
+    const result = await svc.recordOrder(SHOP, {
+      id: 2002,
+      name: '#2002',
+      line_items: [
+        {
+          properties: [
+            { name: '_Embroidery Config Ref', value: a.configRef },
+            { name: 'Customization ID', value: logo.configurationId },
+            {
+              name: '_Embroidery Mockup',
+              value: `https://shop.example/apps/embroidery/preview/${previewRef}.jpg`,
+            },
+          ],
+        },
+        {
+          properties: [
+            { name: '_Embroidery Config Ref', value: b.configRef },
+            { name: 'Customization ID', value: text.configurationId },
+          ],
+        },
+      ],
+    });
+    expect(result).toMatchObject({ linked: 2, logoPending: true });
+    const ordered = rows.find((r) => r.configRef === a.configRef)!;
+    expect(ordered.previewRef).toBe(previewRef);
+    expect(tables.artwork!.find((r) => r.storageRef === previewRef)?.orderedAt).toBeInstanceOf(
+      Date,
+    );
+
+    const queue = await svc.listApprovals(SHOP);
+    expect(queue.map((r) => r.configRef)).toEqual([a.configRef]);
+
+    await expect(
+      svc.reviewDesign(SHOP, ordered.id, 'changes_requested', ' '),
+    ).rejects.toMatchObject({ status: 422 });
+    const changes = await svc.reviewDesign(
+      SHOP,
+      ordered.id,
+      'changes_requested',
+      'Please send a larger PNG.',
+    );
+    expect(changes).toMatchObject({ orderId: '2002', orderSettled: false });
+    const approved = await svc.reviewDesign(SHOP, ordered.id, 'approved');
+    expect(approved).toMatchObject({ orderId: '2002', orderSettled: true });
+    expect(await svc.listApprovals(SHOP)).toHaveLength(0);
+    await expect(
+      svc.reviewDesign('other.myshopify.com', ordered.id, 'approved'),
+    ).rejects.toMatchObject({ status: 404 });
   });
 });

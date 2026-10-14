@@ -22,6 +22,8 @@ import {
   type ProductVariant,
   type RenderedDimensions,
   type TextDesign,
+  type DesignTemplate,
+  fillTemplateText,
 } from '@embroidery/shared';
 
 export const STEPS = ['Product', 'Design', 'Placement', 'Review'] as const;
@@ -42,6 +44,8 @@ export interface EditorLayer {
   text: TextDesign;
   image: ImageDesign | null;
   placement: Placement;
+  /** Set by templates: which layer carries the per-person name / jersey number in team orders. */
+  role?: 'name' | 'number';
 }
 
 export interface EditorState {
@@ -70,14 +74,22 @@ export type EditorAction =
   | { type: 'updateImage'; patch: LayerPatch<ImageDesign>; layerId?: string }
   | { type: 'removeImage' }
   | { type: 'setPosition'; positionId: PlacementId }
-  | { type: 'updatePlacement'; patch: Partial<Omit<Placement, 'surfaceId' | 'positionId'>>; layerId?: string }
+  | {
+      type: 'updatePlacement';
+      patch: Partial<Omit<Placement, 'surfaceId' | 'positionId'>>;
+      layerId?: string;
+    }
+  | { type: 'applyTemplate'; layers: EditorLayer[] }
   | { type: 'reset'; state: EditorState }
   | { type: 'load'; config: EmbroideryConfiguration; editing: EditingLine | null; asNew?: boolean }
   | { type: 'committed' };
 
 /* ------------------------------------------------------------------ products */
 
-export function optionsOf(product: ProductContext, variant: ProductVariant): Record<string, string> {
+export function optionsOf(
+  product: ProductContext,
+  variant: ProductVariant,
+): Record<string, string> {
   const out: Record<string, string> = {};
   product.options.forEach((o, i) => {
     const v = variant.options[i];
@@ -86,8 +98,13 @@ export function optionsOf(product: ProductContext, variant: ProductVariant): Rec
   return out;
 }
 
-export function findVariant(product: ProductContext, options: Record<string, string>): ProductVariant | undefined {
-  return product.variants.find((v) => product.options.every((o, i) => v.options[i] === options[o.name]));
+export function findVariant(
+  product: ProductContext,
+  options: Record<string, string>,
+): ProductVariant | undefined {
+  return product.variants.find((v) =>
+    product.options.every((o, i) => v.options[i] === options[o.name]),
+  );
 }
 
 /** Pick the best variant after one option changes: exact match, else closest available. */
@@ -103,7 +120,8 @@ export function variantForOption(
   const idx = product.options.findIndex((o) => o.name === name);
   const candidates = product.variants.filter((v) => v.options[idx] === value);
   const score = (v: ProductVariant) =>
-    product.options.reduce((s, o, i) => s + (v.options[i] === wanted[o.name] ? 1 : 0), 0) + (v.available ? 0.5 : 0);
+    product.options.reduce((s, o, i) => s + (v.options[i] === wanted[o.name] ? 1 : 0), 0) +
+    (v.available ? 0.5 : 0);
   return candidates.sort((a, b) => score(b) - score(a))[0];
 }
 
@@ -137,10 +155,56 @@ export function newLayer(
   return {
     id: createLayerId(),
     activeDesign: 'text',
-    text: { ...DEFAULT_TEXT_DESIGN, sizeCm: preset?.defaultTextSizeCm ?? DEFAULT_TEXT_DESIGN.sizeCm, ...text },
+    text: {
+      ...DEFAULT_TEXT_DESIGN,
+      sizeCm: preset?.defaultTextSizeCm ?? DEFAULT_TEXT_DESIGN.sizeCm,
+      ...text,
+    },
     image: null,
     placement: defaultPlacement(adapter, positionId),
   };
+}
+
+/**
+ * Layers for a template, filled with the customer's values. Positions the shop doesn't offer
+ * (or that overlap an earlier layer) are skipped; fonts the shop doesn't offer fall back.
+ */
+export function templateLayers(
+  adapter: ModelAdapter,
+  template: DesignTemplate,
+  values: Record<string, string>,
+  opts: {
+    allowed?: PlacementId[];
+    fontIds?: string[];
+    threadColorId?: string;
+    maxDesigns?: number;
+  } = {},
+): EditorLayer[] {
+  const offered = availablePlacements(adapter, opts.allowed).map((p) => p.id);
+  const out: EditorLayer[] = [];
+  for (const t of template.layers) {
+    if (out.length >= (opts.maxDesigns ?? LIMITS.maxDesigns)) break;
+    if (!offered.includes(t.positionId)) continue;
+    if (out.some((l) => positionsConflict(adapter, l.placement.positionId, t.positionId))) continue;
+    const preset = getPreset(adapter, t.positionId)!;
+    const fontId =
+      !opts.fontIds || opts.fontIds.includes(t.fontId) ? t.fontId : (opts.fontIds[0] ?? t.fontId);
+    const layer = newLayer(adapter, t.positionId, {
+      text: fillTemplateText(t.text, template, values),
+      fontId,
+      sizeCm: clamp(
+        t.sizeCm ?? preset.defaultTextSizeCm,
+        LIMITS.minTextSizeCm,
+        Math.min(LIMITS.maxTextSizeCm, preset.maxHeightCm),
+      ),
+      letterSpacing: t.letterSpacing ?? DEFAULT_TEXT_DESIGN.letterSpacing,
+      alignment: t.alignment ?? 'center',
+      threadColorId: t.threadColorId ?? opts.threadColorId ?? DEFAULT_TEXT_DESIGN.threadColorId,
+      stitchStyle: t.stitchStyle ?? 'flat',
+    });
+    out.push(t.role ? { ...layer, role: t.role } : layer);
+  }
+  return out;
 }
 
 /** The design that will actually be stitched for a layer. */
@@ -151,8 +215,15 @@ export const activeLayer = (state: EditorState): EditorLayer =>
   state.layers.find((l) => l.id === state.activeLayerId) ?? state.layers[0]!;
 
 /** Positions not used by any other layer, in preset order. */
-export function freePositions(state: EditorState, adapter: ModelAdapter, allowed?: PlacementId[], exceptLayerId?: string): PlacementId[] {
-  const used = state.layers.filter((l) => l.id !== exceptLayerId).map((l) => l.placement.positionId);
+export function freePositions(
+  state: EditorState,
+  adapter: ModelAdapter,
+  allowed?: PlacementId[],
+  exceptLayerId?: string,
+): PlacementId[] {
+  const used = state.layers
+    .filter((l) => l.id !== exceptLayerId)
+    .map((l) => l.placement.positionId);
   return availablePlacements(adapter, allowed)
     .map((p) => p.id)
     .filter((id) => !used.some((u) => positionsConflict(adapter, u, id)));
@@ -162,7 +233,12 @@ export function initialEditorState(
   adapter: ModelAdapter,
   product: ProductContext,
   modelUrl: string,
-  opts: { variantId?: string; text?: string; positionId?: PlacementId; threadColorId?: string } = {},
+  opts: {
+    variantId?: string;
+    text?: string;
+    positionId?: PlacementId;
+    threadColorId?: string;
+  } = {},
 ): EditorState {
   const variant =
     product.variants.find((v) => v.id === opts.variantId) ??
@@ -184,7 +260,11 @@ export function initialEditorState(
   };
 }
 
-function mapLayer(state: EditorState, layerId: string | undefined, fn: (l: EditorLayer) => EditorLayer): EditorState {
+function mapLayer(
+  state: EditorState,
+  layerId: string | undefined,
+  fn: (l: EditorLayer) => EditorLayer,
+): EditorState {
   const id = layerId ?? state.activeLayerId;
   return { ...state, layers: state.layers.map((l) => (l.id === id ? fn(l) : l)) };
 }
@@ -197,7 +277,10 @@ function fromConfigLayer(layer: DesignLayer, adapter: ModelAdapter): EditorLayer
     text:
       layer.design.type === 'text'
         ? layer.design
-        : { ...DEFAULT_TEXT_DESIGN, sizeCm: preset?.defaultTextSizeCm ?? DEFAULT_TEXT_DESIGN.sizeCm },
+        : {
+            ...DEFAULT_TEXT_DESIGN,
+            sizeCm: preset?.defaultTextSizeCm ?? DEFAULT_TEXT_DESIGN.sizeCm,
+          },
     image: layer.design.type === 'image' ? layer.design : null,
     placement: constrainPlacement(adapter, layer.placement),
   };
@@ -209,11 +292,22 @@ export function editorReducer(adapter: ModelAdapter) {
       case 'goTo':
         return { ...state, step: action.step };
       case 'selectOption': {
-        const variant = variantForOption(action.product, state.product.options, action.name, action.value);
+        const variant = variantForOption(
+          action.product,
+          state.product.options,
+          action.name,
+          action.value,
+        );
         if (!variant) return state;
         return {
           ...state,
-          product: productSelection(action.product, variant, state.product.modelId, state.product.modelUrl, state.product.quantity),
+          product: productSelection(
+            action.product,
+            variant,
+            state.product.modelId,
+            state.product.modelUrl,
+            state.product.quantity,
+          ),
         };
       }
       case 'selectVariant': {
@@ -221,18 +315,33 @@ export function editorReducer(adapter: ModelAdapter) {
         if (!variant || variant.id === state.product.variantId) return state;
         return {
           ...state,
-          product: productSelection(action.product, variant, state.product.modelId, state.product.modelUrl, state.product.quantity),
+          product: productSelection(
+            action.product,
+            variant,
+            state.product.modelId,
+            state.product.modelUrl,
+            state.product.quantity,
+          ),
         };
       }
       case 'setQuantity':
-        return { ...state, product: { ...state.product, quantity: Math.round(clamp(action.quantity, 1, LIMITS.maxQuantity)) } };
+        return {
+          ...state,
+          product: {
+            ...state.product,
+            quantity: Math.round(clamp(action.quantity, 1, LIMITS.maxQuantity)),
+          },
+        };
 
       case 'selectLayer':
-        return state.layers.some((l) => l.id === action.layerId) ? { ...state, activeLayerId: action.layerId } : state;
+        return state.layers.some((l) => l.id === action.layerId)
+          ? { ...state, activeLayerId: action.layerId }
+          : state;
       case 'addLayer': {
         if (state.layers.length >= LIMITS.maxDesigns) return state;
         const free = freePositions(state, adapter, action.allowed);
-        const positionId = action.positionId && free.includes(action.positionId) ? action.positionId : free[0];
+        const positionId =
+          action.positionId && free.includes(action.positionId) ? action.positionId : free[0];
         if (!positionId) return state;
         const source = activeLayer(state).text;
         const layer = newLayer(adapter, positionId, {
@@ -245,7 +354,8 @@ export function editorReducer(adapter: ModelAdapter) {
       case 'removeLayer': {
         if (state.layers.length <= 1) return state;
         const layers = state.layers.filter((l) => l.id !== action.layerId);
-        const activeLayerId = state.activeLayerId === action.layerId ? layers[0]!.id : state.activeLayerId;
+        const activeLayerId =
+          state.activeLayerId === action.layerId ? layers[0]!.id : state.activeLayerId;
         return { ...state, layers, activeLayerId };
       }
 
@@ -254,12 +364,21 @@ export function editorReducer(adapter: ModelAdapter) {
       case 'updateText':
         return mapLayer(state, undefined, (l) => {
           const text = { ...l.text, ...action.patch };
-          text.sizeCm = Math.round(clamp(text.sizeCm, LIMITS.minTextSizeCm, LIMITS.maxTextSizeCm) * 10) / 10;
-          text.letterSpacing = clamp(text.letterSpacing, LIMITS.minLetterSpacing, LIMITS.maxLetterSpacing);
+          text.sizeCm =
+            Math.round(clamp(text.sizeCm, LIMITS.minTextSizeCm, LIMITS.maxTextSizeCm) * 10) / 10;
+          text.letterSpacing = clamp(
+            text.letterSpacing,
+            LIMITS.minLetterSpacing,
+            LIMITS.maxLetterSpacing,
+          );
           return { ...l, text, activeDesign: 'text' };
         });
       case 'setImage':
-        return mapLayer(state, undefined, (l) => ({ ...l, image: action.image, activeDesign: 'image' }));
+        return mapLayer(state, undefined, (l) => ({
+          ...l,
+          image: action.image,
+          activeDesign: 'image',
+        }));
       case 'updateImage':
         return mapLayer(state, action.layerId, (l) =>
           l.image
@@ -268,7 +387,11 @@ export function editorReducer(adapter: ModelAdapter) {
                 image: {
                   ...l.image,
                   ...action.patch,
-                  scale: clamp(action.patch.scale ?? l.image.scale, LIMITS.minImageScale, LIMITS.maxImageScale),
+                  scale: clamp(
+                    action.patch.scale ?? l.image.scale,
+                    LIMITS.minImageScale,
+                    LIMITS.maxImageScale,
+                  ),
                 },
               }
             : l,
@@ -280,7 +403,9 @@ export function editorReducer(adapter: ModelAdapter) {
         const preset = getPreset(adapter, action.positionId);
         if (!preset || !preset.available) return state;
         const takenByOther = state.layers.some(
-          (l) => l.id !== state.activeLayerId && positionsConflict(adapter, l.placement.positionId, action.positionId),
+          (l) =>
+            l.id !== state.activeLayerId &&
+            positionsConflict(adapter, l.placement.positionId, action.positionId),
         );
         if (takenByOther) return state;
         return mapLayer(state, undefined, (l) => ({
@@ -288,7 +413,14 @@ export function editorReducer(adapter: ModelAdapter) {
           placement: defaultPlacement(adapter, action.positionId),
           text: { ...l.text, sizeCm: preset.defaultTextSizeCm },
           image: l.image
-            ? { ...l.image, scale: clamp(preset.defaultImageWidthCm / preset.maxWidthCm, LIMITS.minImageScale, 1) }
+            ? {
+                ...l.image,
+                scale: clamp(
+                  preset.defaultImageWidthCm / preset.maxWidthCm,
+                  LIMITS.minImageScale,
+                  1,
+                ),
+              }
             : null,
         }));
       }
@@ -298,6 +430,9 @@ export function editorReducer(adapter: ModelAdapter) {
           placement: constrainPlacement(adapter, { ...l.placement, ...action.patch }),
         }));
 
+      case 'applyTemplate':
+        if (!action.layers.length) return state;
+        return { ...state, layers: action.layers, activeLayerId: action.layers[0]!.id };
       case 'reset':
         return { ...action.state, editing: state.editing };
       case 'load': {
@@ -308,7 +443,11 @@ export function editorReducer(adapter: ModelAdapter) {
           // "asNew" (shared/saved designs) starts a fresh customization so it becomes its own cart line.
           configurationId: action.asNew ? createId() : c.configurationId,
           createdAt: action.asNew ? new Date().toISOString() : c.createdAt,
-          product: { ...c.product, modelId: state.product.modelId, modelUrl: state.product.modelUrl },
+          product: {
+            ...c.product,
+            modelId: state.product.modelId,
+            modelUrl: state.product.modelUrl,
+          },
           layers,
           activeLayerId: layers[0]!.id,
           editing: action.editing,
@@ -316,7 +455,12 @@ export function editorReducer(adapter: ModelAdapter) {
       }
       case 'committed':
         // Next customization gets a fresh identity so it becomes a separate cart line.
-        return { ...state, configurationId: createId(), createdAt: new Date().toISOString(), editing: null };
+        return {
+          ...state,
+          configurationId: createId(),
+          createdAt: new Date().toISOString(),
+          editing: null,
+        };
       default:
         return state;
     }

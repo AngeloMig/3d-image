@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { TSHIRT_V1, type ProductContext } from '@embroidery/shared';
-import { activeLayer, buildConfiguration, editorReducer, initialEditorState } from './editorState';
+import { TSHIRT_V1, findTemplate, type ProductContext } from '@embroidery/shared';
+import {
+  activeLayer,
+  buildConfiguration,
+  editorReducer,
+  initialEditorState,
+  templateLayers,
+} from './editorState';
 
 const L = (s: ReturnType<typeof initialEditorState>) => activeLayer(s);
 
@@ -83,11 +89,20 @@ describe('editor reducer', () => {
     s = reduce(s, { type: 'addLayer' }); // center chest overlaps left chest → right chest
     s = reduce(s, { type: 'addLayer', positionId: 'center_back' });
     s = reduce(s, { type: 'addLayer' });
-    expect(s.layers.map((l) => l.placement.positionId)).toEqual(['left_chest', 'right_chest', 'center_back', 'upper_back']);
+    expect(s.layers.map((l) => l.placement.positionId)).toEqual([
+      'left_chest',
+      'right_chest',
+      'center_back',
+      'upper_back',
+    ]);
     expect(s.activeLayerId).toBe(s.layers[3]!.id);
     expect(reduce(s, { type: 'addLayer' }).layers).toHaveLength(4); // max reached
     s = reduce(s, { type: 'removeLayer', layerId: s.layers[1]!.id });
-    expect(s.layers.map((l) => l.placement.positionId)).toEqual(['left_chest', 'center_back', 'upper_back']);
+    expect(s.layers.map((l) => l.placement.positionId)).toEqual([
+      'left_chest',
+      'center_back',
+      'upper_back',
+    ]);
   });
 
   it('blocks overlapping positions (center chest vs left/right chest)', () => {
@@ -120,7 +135,37 @@ describe('editor reducer', () => {
     const loaded = reduce(s, { type: 'load', config, editing: null, asNew: true });
     expect(loaded.configurationId).not.toBe(config.configurationId);
     expect(loaded.layers[0]!.text.text).toBe('YOUR NAME');
-    const editing = reduce(s, { type: 'load', config, editing: { lineKey: 'k', customizationId: config.configurationId } });
+    const editing = reduce(s, {
+      type: 'load',
+      config,
+      editing: { lineKey: 'k', customizationId: config.configurationId },
+    });
     expect(editing.configurationId).toBe(config.configurationId);
+  });
+});
+
+describe('templates', () => {
+  const jersey = findTemplate('team-jersey')!;
+
+  it('builds every layer of a template with the customer’s values and roles', () => {
+    const layers = templateLayers(TSHIRT_V1, jersey, { team: 'hawks', name: 'Sam', number: '7' });
+    expect(layers.map((l) => [l.placement.positionId, l.text.text, l.role])).toEqual([
+      ['center_chest', 'HAWKS', undefined],
+      ['upper_back', 'SAM', 'name'],
+      ['center_back', '7', 'number'],
+    ]);
+    // Big jersey numbers are capped by the position's height.
+    expect(layers[2]!.text.sizeCm).toBeLessThanOrEqual(22);
+    const s = reduce(init(), { type: 'applyTemplate', layers });
+    expect(s.layers).toHaveLength(3);
+    expect(s.activeLayerId).toBe(layers[0]!.id);
+  });
+
+  it('skips positions the shop doesn’t offer and respects the design limit', () => {
+    const chestOnly = templateLayers(TSHIRT_V1, jersey, {}, { allowed: ['center_chest'] });
+    expect(chestOnly.map((l) => l.placement.positionId)).toEqual(['center_chest']);
+    expect(templateLayers(TSHIRT_V1, jersey, {}, { maxDesigns: 2 })).toHaveLength(2);
+    const noVarsity = templateLayers(TSHIRT_V1, jersey, {}, { fontIds: ['block'] });
+    expect(noVarsity.every((l) => l.text.fontId === 'block')).toBe(true);
   });
 });

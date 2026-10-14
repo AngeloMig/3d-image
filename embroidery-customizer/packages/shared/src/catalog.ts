@@ -186,7 +186,8 @@ export const LIMITS = {
   maxLines: 2,
   maxCharsPerLine: 20,
   minTextSizeCm: 0.6,
-  maxTextSizeCm: 6,
+  /** Jersey numbers on the back need big letters; each position caps it further (maxHeightCm). */
+  maxTextSizeCm: 22,
   minLetterSpacing: -0.05,
   maxLetterSpacing: 0.5,
   minPlacementScale: 0.5,

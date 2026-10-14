@@ -49,7 +49,10 @@ describe('configuration serialization', () => {
     const json = serializeConfiguration(c);
     expect(json).not.toContain('blob:');
     expect(JSON.parse(json).layers[0].design.previewUrl).toBeNull();
-    expect(parseConfiguration(json).layers[0]!.design).toMatchObject({ storageRef: 'art_123', previewUrl: null });
+    expect(parseConfiguration(json).layers[0]!.design).toMatchObject({
+      storageRef: 'art_123',
+      previewUrl: null,
+    });
   });
 
   it('upgrades saved v1 (single design) configurations', () => {
@@ -73,7 +76,10 @@ describe('configuration serialization', () => {
 
   it('caps the number of designs', () => {
     const c = createConfiguration(TSHIRT_V1, product);
-    const many = { ...c, layers: [0, 1, 2, 3, 4].map((i) => ({ ...c.layers[0]!, layerId: `l${i}` })) };
+    const many = {
+      ...c,
+      layers: [0, 1, 2, 3, 4].map((i) => ({ ...c.layers[0]!, layerId: `l${i}` })),
+    };
     expect(() => parseConfiguration(JSON.stringify(many))).toThrow(/at most 4/);
   });
 

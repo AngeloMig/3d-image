@@ -1,6 +1,6 @@
-# Shopify app configuration. Run `npm run config:link` (shopify app config link) to connect this
-# project to an app in your Partner Dashboard — that fills in client_id and URLs. No secrets here.
-client_id = ""
+# Shopify app configuration (linked with `npm run config:link`). No secrets here — the client ID
+# is public; URLs are updated automatically by `shopify app dev`.
+client_id = "9eef482ccf4079a5bea84f556904f71f"
 name = "Embroidery Customizer"
 application_url = "https://example.com"
 embedded = true
@@ -10,8 +10,9 @@ automatically_update_urls_on_dev = true
 include_config_on_deploy = true
 
 [access_scopes]
-# read_orders: needed for the orders/create webhook that retains artwork for ordered items.
-scopes = "read_orders"
+# read_orders: the orders/create webhook that retains artwork for ordered items.
+# write_orders: tagging orders when staff approve a logo or request changes.
+scopes = "read_orders,write_orders"
 
 [auth]
 redirect_urls = ["https://example.com/auth/callback"]

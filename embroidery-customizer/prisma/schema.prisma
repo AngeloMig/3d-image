@@ -33,10 +33,13 @@ model Session {
   refreshTokenExpires DateTime?
 }
 
-/// Customer-uploaded artwork. Bytes live in object storage (local disk in dev, S3/R2 in prod).
+/// Customer-uploaded artwork and generated mockups. Bytes live in object storage
+/// (local disk in dev, S3/R2 in prod).
 model Artwork {
   id         String    @id @default(cuid())
   shop       String
+  /// "artwork" (customer upload, "art_…") or "mockup" (3D preview image for emails, "pv_…").
+  kind       String    @default("artwork")
   /// Opaque public reference used in cart properties ("art_…"). Never the storage key.
   storageRef String    @unique
   /// Object key in the storage bucket (shop-scoped, unguessable).
@@ -67,7 +70,14 @@ model EmbroideryConfiguration {
   orderId         String?
   orderName       String?
   orderedAt       DateTime?
+  /// Mockup image ("pv_…") shown in the order email and to staff.
+  previewRef      String?
+  /// Logo designs: "pending" → "approved" | "changes_requested". Null for text-only designs.
+  approvalStatus  String?
+  approvalNote    String?
+  reviewedAt      DateTime?
 
   @@index([shop, customizationId])
+  @@index([shop, approvalStatus])
   @@index([shop, createdAt])
 }

@@ -18,6 +18,11 @@ export interface PersistenceAdapter {
   loadConfiguration(configRef: string): Promise<EmbroideryConfiguration>;
   /** Returns a same-origin object URL for previewing stored artwork (safe for WebGL textures). */
   resolveArtworkUrl(storageRef: string): Promise<string>;
+  /**
+   * Stores the 3D mockup (JPEG) and returns an absolute URL usable in order emails.
+   * Returns null where mockups aren't kept (demo, app not installed).
+   */
+  uploadMockup?(image: Blob): Promise<{ url: string } | null>;
 }
 
 export class PersistenceError extends Error {

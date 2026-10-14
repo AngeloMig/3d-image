@@ -50,6 +50,8 @@ interface Props {
   priceHint: (code: FeeCode) => string | null;
   /** e.g. "Medium size · +$3.00" for the current design. */
   sizeHint: string | null;
+  /** Largest letter height the current position can hold (cm). */
+  maxTextSizeCm?: number;
 }
 
 export function DesignStep(p: Props) {
@@ -210,7 +212,7 @@ function TextPanel(p: Props) {
           label="Letter height"
           value={p.text.sizeCm}
           min={LIMITS.minTextSizeCm}
-          max={LIMITS.maxTextSizeCm}
+          max={Math.max(p.text.sizeCm, p.maxTextSizeCm ?? LIMITS.maxTextSizeCm)}
           step={0.1}
           format={formatCm}
           testId="text-size"
@@ -411,9 +413,10 @@ function ImagePanel(p: Props) {
           onInput={p.onImageScale}
         />
       ) : null}
-      <Notice tone="info">
-        Uploaded artwork is a visual preview. Our team digitizes it into an embroidery stitch file
-        before production and will contact you if anything can’t be stitched cleanly.
+      <Notice tone="info" testId="logo-approval-note">
+        <strong>Every logo is checked before stitching.</strong> Our team reviews your artwork after
+        you order and digitizes it into a stitch file. If anything can’t be stitched cleanly, we’ll
+        contact you before production starts.
       </Notice>
     </>
   );

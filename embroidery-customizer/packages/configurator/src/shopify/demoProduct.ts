@@ -39,4 +39,9 @@ export const DEMO_PRICING: PricingSettings = {
     style_chenille: { price: 700, variantId: 'demo-fee-chenille' },
     font_premium: { price: 200, variantId: 'demo-fee-font' },
   },
+  bulkTiers: [
+    { minQuantity: 10, percentOff: 10 },
+    { minQuantity: 25, percentOff: 15 },
+    { minQuantity: 50, percentOff: 20 },
+  ],
 };

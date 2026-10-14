@@ -37,6 +37,8 @@ export const PROPERTY_KEYS = {
   schema: '_Embroidery Schema',
   /** Fees this item owes (restores deleted fee lines). */
   feePlan: '_Embroidery Fees',
+  /** Absolute URL of the 3D mockup image (order email, staff). */
+  mockup: '_Embroidery Mockup',
 } as const;
 
 /** Properties on fee lines ("Embroidery fee" product) that tie them to a customized item. */
@@ -66,6 +68,8 @@ export interface BuildPropertiesOptions {
   configRef: string;
   /** Team orders: "row of total" label, e.g. "3 of 12". */
   teamPosition?: string;
+  /** Absolute URL of the saved 3D mockup, if one was stored. */
+  mockupUrl?: string | null;
 }
 
 function describeAdjustment(layer: DesignLayer): string | null {
@@ -78,7 +82,11 @@ function describeAdjustment(layer: DesignLayer): string | null {
   return parts.length ? parts.join(', ') : null;
 }
 
-function layerProperties(config: EmbroideryConfiguration, layer: DesignLayer, index: number): LineItemProperties {
+function layerProperties(
+  config: EmbroideryConfiguration,
+  layer: DesignLayer,
+  index: number,
+): LineItemProperties {
   const adapter = getModelAdapter(config.product.modelId);
   const preset = getPreset(adapter, layer.placement.positionId);
   // Design 1 keeps the classic keys; others read "Design 2 – Type", "_Design 2 – Artwork Ref"…
@@ -94,7 +102,8 @@ function layerProperties(config: EmbroideryConfiguration, layer: DesignLayer, in
     props[key(PROPERTY_KEYS.type)] = 'Text';
     props[key(PROPERTY_KEYS.text)] = textLines(design.text).join(' / ');
     props[key(PROPERTY_KEYS.font)] = findFont(design.fontId)?.label ?? design.fontId;
-    props[key(PROPERTY_KEYS.thread)] = findThreadColor(design.threadColorId)?.label ?? design.threadColorId;
+    props[key(PROPERTY_KEYS.thread)] =
+      findThreadColor(design.threadColorId)?.label ?? design.threadColorId;
   } else {
     props[key(PROPERTY_KEYS.type)] = 'Logo / Image';
     props[key(PROPERTY_KEYS.artwork)] = design.originalFilename;
@@ -104,26 +113,33 @@ function layerProperties(config: EmbroideryConfiguration, layer: DesignLayer, in
   }
   props[key(PROPERTY_KEYS.style)] = findStitchStyle(design.stitchStyle).label;
   props[key(PROPERTY_KEYS.placement)] = preset?.label ?? layer.placement.positionId;
-  if (layer.rendered) props[key(PROPERTY_KEYS.size)] = formatDimensions(layer.rendered.widthCm, layer.rendered.heightCm);
+  if (layer.rendered)
+    props[key(PROPERTY_KEYS.size)] = formatDimensions(
+      layer.rendered.widthCm,
+      layer.rendered.heightCm,
+    );
   const adjustment = describeAdjustment(layer);
   if (adjustment) props[key(PROPERTY_KEYS.adjustment)] = adjustment;
-  if (layer.placement.rotationDeg !== 0) props[key(PROPERTY_KEYS.rotation)] = `${layer.placement.rotationDeg}°`;
+  if (layer.placement.rotationDeg !== 0)
+    props[key(PROPERTY_KEYS.rotation)] = `${layer.placement.rotationDeg}°`;
   return props;
 }
 
 /** Human-readable fulfilment metadata + opaque references. Never includes image data. */
 export function buildLineItemProperties(
   config: EmbroideryConfiguration,
-  { configRef, teamPosition }: BuildPropertiesOptions,
+  { configRef, teamPosition, mockupUrl }: BuildPropertiesOptions,
 ): LineItemProperties {
   let props: LineItemProperties = {};
   if (config.layers.length > 1) props[PROPERTY_KEYS.designs] = String(config.layers.length);
   config.layers.forEach((layer, i) => (props = { ...props, ...layerProperties(config, layer, i) }));
   if (config.teamOrderId)
-    props[PROPERTY_KEYS.teamOrder] = `${config.teamOrderId.slice(0, 8).toUpperCase()}${teamPosition ? ` (${teamPosition})` : ''}`;
+    props[PROPERTY_KEYS.teamOrder] =
+      `${config.teamOrderId.slice(0, 8).toUpperCase()}${teamPosition ? ` (${teamPosition})` : ''}`;
   props[PROPERTY_KEYS.customizationId] = config.configurationId;
   props[PROPERTY_KEYS.configRef] = configRef;
   props[PROPERTY_KEYS.schema] = String(config.schemaVersion);
+  if (mockupUrl) props[PROPERTY_KEYS.mockup] = mockupUrl;
   return props;
 }
 
