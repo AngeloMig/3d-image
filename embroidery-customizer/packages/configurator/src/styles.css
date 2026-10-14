@@ -4170,3 +4170,537 @@ select {
   text-align: center;
   font-variant-numeric: tabular-nums;
 }
+
+/* =====================================================================================
+ * Full-screen live preview (native Fullscreen API, or pinned over the page on iPhone).
+ * ===================================================================================== */
+
+.emb-viewer.is-fullscreen,
+.emb-viewer:fullscreen {
+  position: fixed !important;
+  inset: 0 !important;
+  z-index: 2147483000;
+  width: 100vw !important;
+  height: 100vh !important;
+  height: 100dvh !important;
+  max-height: none !important;
+  border-radius: 0 !important;
+  margin: 0 !important;
+}
+
+.emb-viewer:fullscreen::backdrop {
+  background: #edf0ee;
+}
+
+.emb-viewer.is-fullscreen .emb-viewer__controls {
+  bottom: max(18px, env(safe-area-inset-bottom));
+}
+
+/* =====================================================================================
+ * Review: compact summary — product line, then one quiet card per design.
+ * ===================================================================================== */
+
+.emb-root .emb-review {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+}
+
+.emb-root .emb-review__thumb {
+  width: 72px;
+  height: 72px;
+  object-fit: cover;
+  border-radius: 12px;
+  background: var(--emb-surface-2);
+}
+
+.emb-review__body {
+  min-width: 0;
+}
+
+.emb-review__product {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--emb-line);
+}
+
+.emb-review__product strong {
+  display: block;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--emb-ink);
+  line-height: 1.3;
+}
+
+.emb-review__product span {
+  display: block;
+  margin-top: 2px;
+  font-size: 12.5px;
+  color: var(--emb-muted);
+}
+
+.emb-review__designs {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.emb-rdesign {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: start;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--emb-line);
+}
+
+.emb-rdesign:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+.emb-rdesign__num {
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  margin-top: 1px;
+  border-radius: 50%;
+  background: var(--emb-surface-2);
+  color: var(--emb-muted);
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.emb-rdesign__text {
+  min-width: 0;
+}
+
+.emb-rdesign__main {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--emb-ink);
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.emb-rdesign__meta {
+  margin: 2px 0 0;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--emb-muted);
+}
+
+.emb-review__product .emb-link,
+.emb-rdesign .emb-link {
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+
+[data-theme='sport'] .emb-rdesign__num {
+  background: #111;
+  color: #fff;
+}
+
+[data-theme='sport'] .emb-rdesign__main {
+  letter-spacing: 0.01em;
+}
+
+/* =====================================================================================
+ * Designs bar: compact chips with an icon / logo thumbnail, then "+ Text" "+ Logo".
+ * ===================================================================================== */
+
+.emb-layers__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.emb-layers__head .emb-field__label {
+  margin: 0;
+}
+
+.emb-layers__head .emb-muted {
+  font-size: 12px;
+}
+
+.emb-layers__list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.emb-layer__select {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  padding: 5px 10px 5px 6px;
+  font-size: 12.5px;
+}
+
+.emb-layer__icon {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--emb-surface-2);
+  color: var(--emb-muted);
+  overflow: hidden;
+}
+
+.emb-layer__icon svg {
+  width: 13px;
+  height: 13px;
+}
+
+.emb-layer__icon img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background:
+    repeating-conic-gradient(#e9e9e9 0% 25%, #fff 0% 50%) 50% / 8px 8px;
+}
+
+.emb-layer.is-active .emb-layer__icon {
+  background: var(--emb-ink);
+  color: #fff;
+}
+
+.emb-layer__title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 22ch;
+}
+
+.emb-layers__add {
+  display: inline-flex;
+  gap: 6px;
+}
+
+.emb-root .emb-layer-add {
+  padding: 5px 12px;
+  font-size: 12.5px;
+  border-style: dashed;
+}
+
+.emb-root .emb-layer-add svg {
+  width: 13px;
+  height: 13px;
+}
+
+.emb-layers--actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--emb-line);
+}
+
+.emb-layers--actions .emb-field__label {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--emb-muted);
+}
+
+/* =====================================================================================
+ * Templates v2: collapsible strip of preview cards, category chips, live form.
+ * ===================================================================================== */
+
+.emb-templates {
+  border: 1px solid var(--emb-line);
+  border-radius: var(--emb-radius-sm);
+  background: var(--emb-surface);
+}
+
+.emb-templates__toggle {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 0;
+  background: none;
+  color: var(--emb-ink);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.emb-templates__toggle strong {
+  font-weight: 600;
+}
+
+.emb-templates__toggle .emb-muted {
+  font-size: 12px;
+}
+
+.emb-templates__chevron {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(45deg) translateY(-2px);
+  transition: transform 0.2s var(--emb-ease);
+}
+
+.emb-templates.is-open .emb-templates__chevron {
+  transform: rotate(-135deg) translateY(-2px);
+}
+
+.emb-templates__body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 0 12px 12px;
+}
+
+.emb-templates__cats {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.emb-templates__cats::-webkit-scrollbar {
+  display: none;
+}
+
+.emb-tcat {
+  flex: none;
+  padding: 4px 11px;
+  border: 1px solid var(--emb-line);
+  border-radius: 999px;
+  background: none;
+  color: var(--emb-muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.emb-tcat.is-on {
+  border-color: var(--emb-ink);
+  background: var(--emb-ink);
+  color: var(--emb-surface);
+}
+
+/* One scrollable row of cards: compact on phones, several visible on wide panels. */
+.emb-root .emb-templates__grid {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(128px, 1fr);
+  grid-template-columns: none;
+  gap: 8px;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  padding-bottom: 4px;
+  scrollbar-width: thin;
+}
+
+@container (min-width: 560px) {
+  .emb-root .emb-templates__grid {
+    grid-auto-columns: calc((100% - 24px) / 4);
+  }
+}
+
+.emb-root .emb-template {
+  scroll-snap-align: start;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--emb-line);
+  border-radius: 12px;
+  background: var(--emb-surface);
+  text-align: left;
+}
+
+.emb-root .emb-template:hover {
+  border-color: var(--emb-line-strong);
+  box-shadow: 0 6px 18px -12px rgba(0, 0, 0, 0.35);
+}
+
+.emb-root .emb-template.is-on {
+  border-color: var(--emb-ink);
+  box-shadow: inset 0 0 0 1px var(--emb-ink);
+}
+
+.emb-tthumb {
+  display: grid;
+  place-items: center;
+  aspect-ratio: 4 / 3;
+  padding: 8px;
+  background: var(--emb-surface-2);
+}
+
+.emb-tthumb.is-pair {
+  grid-template-columns: 1fr 1fr;
+  gap: 2px;
+  padding: 8px 4px;
+}
+
+.emb-tthumb__svg {
+  width: 100%;
+  height: 100%;
+  max-height: 96px;
+  overflow: visible;
+}
+
+.emb-template__text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 7px 9px 8px;
+}
+
+.emb-root .emb-template strong {
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.emb-template__meta {
+  font-size: 11px;
+  color: var(--emb-muted);
+}
+
+.emb-templates__hint {
+  margin: 0;
+  font-size: 12px;
+}
+
+.emb-root .emb-template-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 12px;
+  background: var(--emb-surface-2);
+  animation: emb-rise 0.2s var(--emb-ease);
+}
+
+.emb-template-form__title {
+  margin: 0;
+  font-size: 12.5px;
+}
+
+.emb-template-form__fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 8px;
+}
+
+.emb-template-form__actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+[data-theme='sport'] .emb-root .emb-template.is-on,
+[data-theme='sport'] .emb-template.is-on {
+  background: var(--emb-surface);
+  color: inherit;
+  border-color: #111;
+}
+
+[data-theme='sport'] .emb-tcat.is-on {
+  background: #111;
+  color: #fff;
+}
+
+/* Templates v2 polish: fixed-width cards, tag on the picture, single-line price. */
+.emb-root .emb-templates__grid,
+.emb-root .emb-templates__grid {
+  grid-auto-columns: 136px;
+}
+
+@container (min-width: 560px) {
+  .emb-root .emb-templates__grid {
+    grid-auto-columns: 136px;
+  }
+}
+
+.emb-root .emb-template {
+  position: relative;
+}
+
+.emb-tthumb {
+  position: relative;
+  background:
+    radial-gradient(80% 70% at 50% 35%, #fff 0%, rgba(255, 255, 255, 0) 70%),
+    var(--emb-surface-2);
+}
+
+.emb-tthumb__svg {
+  filter: drop-shadow(0 3px 4px rgba(0, 0, 0, 0.12));
+}
+
+.emb-template__tag {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.85);
+  color: var(--emb-muted);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.emb-template__text {
+  display: flex;
+  flex-direction: row;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.emb-root .emb-template strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.emb-template__meta {
+  flex: none;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.emb-root .emb-template.is-on::after {
+  content: '✓';
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--emb-ink);
+  color: var(--emb-surface);
+  font-size: 11px;
+  font-weight: 700;
+}

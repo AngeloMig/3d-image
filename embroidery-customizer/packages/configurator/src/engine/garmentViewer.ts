@@ -54,6 +54,8 @@ export interface ViewerCallbacks {
   onFacingChange?(facing: Facing): void;
   /** Cumulative drag delta in cm (screen-right / up positive) since the drag started. */
   onDesignDrag?(dxCm: number, dyCm: number, phase: 'start' | 'move' | 'end', layerId: string): void;
+  /** A design was tapped/clicked (not dragged) while dragging is off: select it. */
+  onDesignClick?(layerId: string): void;
   onContextLost?(): void;
 }
 
@@ -197,6 +199,8 @@ export class GarmentViewer {
   private tween: { from: Spherical; to: Spherical; start: number; duration: number } | null = null;
   private facing: Facing = 'front';
   private dragEnabled = false;
+  /** Pointer-down on a design while dragging is off; becomes a click if it barely moves. */
+  private tap: { pointerId: number; x: number; y: number; id: string } | null = null;
   private drag: { pointerId: number; start: Vector3; id: string } | null = null;
   private disposed = false;
 
@@ -785,7 +789,12 @@ export class GarmentViewer {
   }
 
   private onPointerDown(e: PointerEvent): void {
-    if (!this.dragEnabled || e.button !== 0) return;
+    if (e.button !== 0) return;
+    if (!this.dragEnabled) {
+      const tapped = this.callbacks.onDesignClick ? this.decalUnderPointer(e) : null;
+      this.tap = tapped ? { pointerId: e.pointerId, x: e.clientX, y: e.clientY, id: tapped } : null;
+      return;
+    }
     const id = this.decalUnderPointer(e);
     if (!id) return;
     const start = this.garmentPoint(e);
@@ -810,12 +819,25 @@ export class GarmentViewer {
       );
       return;
     }
-    if (this.dragEnabled && e.pointerType === 'mouse' && e.buttons === 0) {
-      this.renderer.domElement.style.cursor = this.decalUnderPointer(e) ? 'grab' : '';
+    if (e.pointerType === 'mouse' && e.buttons === 0) {
+      const over = this.decalUnderPointer(e);
+      this.renderer.domElement.style.cursor = over
+        ? this.dragEnabled
+          ? 'grab'
+          : this.callbacks.onDesignClick
+            ? 'pointer'
+            : ''
+        : '';
     }
   }
 
   private onPointerUp(e: PointerEvent): void {
+    const tap = this.tap;
+    this.tap = null;
+    if (tap && tap.pointerId === e.pointerId && Math.hypot(e.clientX - tap.x, e.clientY - tap.y) < 6) {
+      this.callbacks.onDesignClick?.(tap.id);
+      return;
+    }
     if (!this.drag || e.pointerId !== this.drag.pointerId) return;
     const id = this.drag.id;
     this.drag = null;

@@ -72,7 +72,7 @@ test('team order: one design, a name and size per person, added as separate line
   await page.getByTestId('open-cart').click();
   const lines = page.getByTestId('cart-line');
   await expect(lines).toHaveCount(3);
-  await expect(lines.nth(1)).toContainText('L / Royal');
+  await expect(lines.nth(1)).toContainText('L / White'); // default garment colour
   for (const [i, n] of ['ALEX', 'SAM', 'JORDAN'].entries()) {
     await expect(lines.nth(i)).toContainText(n);
     await expect(lines.nth(i)).toContainText(`(${i + 1} of 3)`);
@@ -170,7 +170,7 @@ test('team jersey template: name + number per person, bulk saving from 10 shirts
   page,
 }) => {
   await page.getByTestId('step-2').click();
-  await page.getByTestId('templates').locator('summary').click();
+  // Open by default while the design is still the default one.
   await page.getByTestId('template-team-jersey').click();
   await page.getByTestId('template-field-team').fill('hawks');
   await expect(page.getByTestId('template-field-team')).toHaveValue('HAWKS');
@@ -229,3 +229,52 @@ test('garments: switching to the polo keeps the designs and moves Center Chest',
   await page.getByTestId('open-cart').click();
   await expect(page.getByTestId('cart-line').first()).toContainText('Embroidered Polo');
 });
+
+test('templates: live on the shirt while typing, undo restores the previous design', async ({
+  page,
+}) => {
+  await page.getByTestId('step-2').click();
+  await page.getByTestId('text-input').fill('MINE');
+  await page.getByTestId('template-family-reunion').click();
+  await expect(page.getByTestId('layer-bar')).toContainText('SMITH FAMILY');
+  await page.getByTestId('template-field-family').fill('lopez');
+  await expect(page.getByTestId('template-field-family')).toHaveValue('LOPEZ');
+  await expect(page.getByTestId('layer-bar')).toContainText('LOPEZ FAMILY');
+  await expect.poll(async () => (await viewerState(page, HOST)).decals?.length).toBe(1);
+  // Each card shows its embroidery price on this garment.
+  await expect(page.getByTestId('template-varsity-letter')).toContainText('+$');
+
+  await page.getByTestId('template-undo').click();
+  await expect(page.getByTestId('layer-bar')).toContainText('MINE');
+  await expect(page.getByTestId('layer-bar')).not.toContainText('LOPEZ');
+});
+
+test('add a logo from the review step, click it on the shirt, full-screen preview', async ({
+  page,
+}) => {
+  await page.getByTestId('step-4').click();
+  await page.getByTestId('add-logo-input').setInputFiles({
+    name: 'badge.png',
+    mimeType: 'image/png',
+    buffer: Buffer.from(
+      // 64×64 red PNG
+      'iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAIAAAAlC+aJAAAAQ0lEQVR42u3PMQ0AAAgDIN8/9K3hHFQgnZ1tCwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCwuLBQcxAAH1sGQ9AAAAAElFTkSuQmCC',
+      'base64',
+    ),
+  });
+  // Lands on the Design step with the new logo design selected.
+  await expect(page.getByTestId('artwork-card')).toContainText('badge.png');
+  await expect(page.getByTestId('layer-bar')).toContainText('Logo');
+  await expect.poll(async () => (await viewerState(page, HOST)).decals?.length).toBe(2);
+
+  // Review: one compact card per design, one Edit each.
+  await page.getByTestId('step-4').click();
+  await expect(page.getByTestId('review-summary').locator('.emb-rdesign')).toHaveCount(2);
+
+  await page.getByTestId('fullscreen').click();
+  await expect(page.getByTestId('viewer')).toHaveClass(/is-fullscreen/);
+  // (Esc also exits in real browsers; headless Chromium doesn't route it to fullscreen.)
+  await page.getByTestId('fullscreen').click();
+  await expect(page.getByTestId('viewer')).not.toHaveClass(/is-fullscreen/);
+});
+

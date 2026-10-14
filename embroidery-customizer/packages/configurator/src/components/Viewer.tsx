@@ -6,7 +6,16 @@ import {
   type GarmentInfo,
   type ViewerCallbacks,
 } from '../engine/garmentViewer';
-import { IconBack, IconFront, IconMinus, IconPlus, IconReset, IconRotate } from './icons';
+import {
+  IconBack,
+  IconCollapse,
+  IconExpand,
+  IconFront,
+  IconMinus,
+  IconPlus,
+  IconReset,
+  IconRotate,
+} from './icons';
 
 export type ViewerStatus =
   | { state: 'loading'; progress: number }
@@ -19,6 +28,7 @@ interface ViewerProps {
   modelUrl: string;
   onViewer: (viewer: GarmentViewer | null, info: GarmentInfo | null) => void;
   onDesignDrag: NonNullable<ViewerCallbacks['onDesignDrag']>;
+  onDesignClick?: (layerId: string) => void;
   onFacingChange?: (facing: Facing) => void;
   designSurface: 'front' | 'back' | null;
   dragHint: boolean;
@@ -40,6 +50,45 @@ export function Viewer(p: ViewerProps) {
   const [status, setStatus] = useState<ViewerStatus>({ state: 'loading', progress: 0 });
   const [facing, setFacing] = useState<Facing>('front');
   const [attempt, setAttempt] = useState(0);
+  const root = useRef<HTMLDivElement>(null);
+  const [fullscreen, setFullscreen] = useState(false);
+
+  /* Full-screen preview: the real Fullscreen API where available (desktop, Android), otherwise
+     (iPhone) the viewer is pinned over the page. Esc / the close button exit either way. */
+  const exitFullscreen = () => {
+    const doc = document as Document & { webkitExitFullscreen?: () => void };
+    const host = root.current?.getRootNode() as Document | ShadowRoot | undefined;
+    if (host?.fullscreenElement || document.fullscreenElement) void document.exitFullscreen?.();
+    else doc.webkitExitFullscreen?.();
+    setFullscreen(false);
+  };
+  const enterFullscreen = () => {
+    setFullscreen(true);
+    const el = root.current as (HTMLElement & { webkitRequestFullscreen?: () => void }) | null;
+    try {
+      if (el?.requestFullscreen) void el.requestFullscreen().catch(() => undefined);
+      else el?.webkitRequestFullscreen?.();
+    } catch {
+      /* CSS fallback stays on */
+    }
+  };
+  useEffect(() => {
+    if (!fullscreen) return;
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && exitFullscreen();
+    // Leaving native fullscreen (Esc, browser UI) also leaves our mode.
+    const onChange = () => {
+      if (!document.fullscreenElement) setFullscreen(false);
+    };
+    const overflow = document.documentElement.style.overflow;
+    document.documentElement.style.overflow = 'hidden';
+    document.addEventListener('keydown', onKey);
+    document.addEventListener('fullscreenchange', onChange);
+    return () => {
+      document.documentElement.style.overflow = overflow;
+      document.removeEventListener('keydown', onKey);
+      document.removeEventListener('fullscreenchange', onChange);
+    };
+  }, [fullscreen]);
   // Keep latest callbacks without re-creating the WebGL renderer.
   const callbacks = useRef(p);
   callbacks.current = p;
@@ -63,6 +112,7 @@ export function Viewer(p: ViewerProps) {
           callbacks.current.onFacingChange?.(f);
         },
         onDesignDrag: (dx, dy, phase, id) => callbacks.current.onDesignDrag(dx, dy, phase, id),
+        onDesignClick: (id) => callbacks.current.onDesignClick?.(id),
         onContextLost: () =>
           setStatus({
             state: 'error',
@@ -130,7 +180,12 @@ export function Viewer(p: ViewerProps) {
   const showBackHint = ready && p.designSurface && facing !== p.designSurface;
 
   return (
-    <div class="emb-viewer" data-testid="viewer" data-status={status.state}>
+    <div
+      ref={root}
+      class={`emb-viewer${fullscreen ? ' is-fullscreen' : ''}`}
+      data-testid="viewer"
+      data-status={status.state}
+    >
       <div class="emb-viewer__heading">
         <span class="emb-viewer__label">3D preview</span>
         <span class={`emb-viewer__status${ready ? ' is-ready' : ''}`}>
@@ -243,6 +298,18 @@ export function Viewer(p: ViewerProps) {
               title="Reset view"
             >
               <IconReset />
+            </button>
+            <button
+              type="button"
+              class="emb-tool emb-tool--icon"
+              onClick={() => (fullscreen ? exitFullscreen() : enterFullscreen())}
+              disabled={!ready}
+              aria-label={fullscreen ? 'Exit full screen' : 'Full screen'}
+              title={fullscreen ? 'Exit full screen' : 'Full screen'}
+              aria-pressed={fullscreen}
+              data-testid="fullscreen"
+            >
+              {fullscreen ? <IconCollapse /> : <IconExpand />}
             </button>
           </div>
         </div>

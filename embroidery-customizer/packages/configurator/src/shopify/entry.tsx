@@ -6,6 +6,7 @@ import { render, type ComponentChildren } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import {
   LIMITS,
+  THREAD_COLORS,
   feeCodeForVariantTitle,
   parseBulkTiers,
   getModelAdapter,
@@ -17,6 +18,7 @@ import { DemoCartAdapter, ShopifyCartAdapter, normalizeRoot } from '@embroidery/
 import styles from '../styles.css?inline';
 import {
   Configurator,
+  DEFAULT_SETTINGS,
   type ConfiguratorProps,
   type ConfiguratorSettings,
   type EditRequest,
@@ -69,6 +71,8 @@ export interface BlockData {
     teamOrders?: boolean;
     sharing?: boolean;
     templates?: boolean;
+    defaultThreadColorId?: string;
+    defaultGarmentColor?: string;
     heading?: string;
     subtitle?: string;
     defaultText?: string;
@@ -112,10 +116,17 @@ function toSettings(data: BlockData): Partial<ConfiguratorSettings> {
     settings.defaultPositionId = s.defaultPositionId as PlacementId;
   else if (positions?.[0]) settings.defaultPositionId = positions[0];
   const threads = clean(s.threadColorIds);
-  if (threads) {
-    settings.threadColorIds = threads;
-    settings.defaultThreadColorId = threads[0]!;
-  }
+  if (threads) settings.threadColorIds = threads;
+  const wantThread = s.defaultThreadColorId?.trim().toLowerCase();
+  const offered = threads ?? THREAD_COLORS.map((t) => t.id);
+  settings.defaultThreadColorId =
+    wantThread && offered.includes(wantThread)
+      ? wantThread
+      : offered.includes(DEFAULT_SETTINGS.defaultThreadColorId)
+        ? DEFAULT_SETTINGS.defaultThreadColorId
+        : offered[0]!;
+  if (typeof s.defaultGarmentColor === 'string')
+    settings.defaultGarmentColor = s.defaultGarmentColor.trim();
   const fonts = clean(s.fontIds);
   if (fonts) settings.fontIds = fonts;
   if (s.maxUploadMb)
@@ -157,6 +168,15 @@ export function toPricing(
   return { fees, bulkTiers: tiers };
 }
 
+/**
+ * The variant to open on: Shopify's selected variant only when the shopper picked one
+ * (?variant= in the URL); otherwise the default garment colour setting decides.
+ */
+function urlVariant(selected: string | number | null | undefined): string | null {
+  const fromUrl = new URLSearchParams(location.search).get('variant');
+  return fromUrl && selected && String(selected) === fromUrl ? fromUrl : null;
+}
+
 type BlockProps = ConfiguratorProps | GarmentConfiguratorProps;
 const isMulti = (p: BlockProps): p is GarmentConfiguratorProps =>
   'garments' in p &&
@@ -182,7 +202,7 @@ async function buildGarmentProps(
       product: g.product
         ? fromShopifyProduct(g.product, data.currency, data.locale)
         : (demoData!.DEMO_GARMENT_PRODUCTS[adapter.id] ?? demoData!.DEMO_PRODUCT),
-      initialVariantId: g.selectedVariantId ? String(g.selectedVariantId) : null,
+      initialVariantId: urlVariant(g.selectedVariantId),
     };
   });
   const common = {
@@ -237,7 +257,7 @@ export async function buildProps(data: BlockData): Promise<BlockProps> {
     adapter,
     modelUrl: data.modelUrl,
     product: fromShopifyProduct(data.product, data.currency, data.locale),
-    initialVariantId: data.selectedVariantId ? String(data.selectedVariantId) : null,
+    initialVariantId: urlVariant(data.selectedVariantId),
     cart: new ShopifyCartAdapter({ root: data.root }),
     persistence: new FallbackPersistence(
       new AppProxyPersistence(data.proxyPath, undefined, data.shopUrl || location.origin),

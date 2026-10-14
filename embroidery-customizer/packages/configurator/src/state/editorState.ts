@@ -24,6 +24,8 @@ import {
   type TextDesign,
   type DesignTemplate,
   fillTemplateText,
+  findSampleLogo,
+  sampleLogoUrl,
 } from '@embroidery/shared';
 
 export const STEPS = ['Product', 'Design', 'Placement', 'Review'] as const;
@@ -66,7 +68,7 @@ export type EditorAction =
   | { type: 'selectVariant'; variantId: string; product: ProductContext }
   | { type: 'setQuantity'; quantity: number }
   | { type: 'selectLayer'; layerId: string }
-  | { type: 'addLayer'; positionId?: PlacementId; allowed?: PlacementId[] }
+  | { type: 'addLayer'; positionId?: PlacementId; allowed?: PlacementId[]; image?: ImageDesign }
   | { type: 'removeLayer'; layerId: string }
   | { type: 'setDesignType'; designType: 'text' | 'image' }
   | { type: 'updateText'; patch: LayerPatch<TextDesign> }
@@ -187,15 +189,14 @@ export function templateLayers(
     fontIds?: string[];
     threadColorId?: string;
     maxDesigns?: number;
+    /** Reuse these layer ids (live editing keeps the same layers while the customer types). */
+    ids?: string[];
   } = {},
 ): EditorLayer[] {
-  const offered = availablePlacements(adapter, opts.allowed).map((p) => p.id);
-  const out: EditorLayer[] = [];
-  for (const t of template.layers) {
-    if (out.length >= (opts.maxDesigns ?? LIMITS.maxDesigns)) break;
-    if (!offered.includes(t.positionId)) continue;
-    if (out.some((l) => positionsConflict(adapter, l.placement.positionId, t.positionId))) continue;
-    const preset = getPreset(adapter, t.positionId)!;
+  const built: EditorLayer[] = [];
+  template.layers.forEach((t, i) => {
+    const preset = getPreset(adapter, t.positionId);
+    if (!preset) return;
     const fontId =
       !opts.fontIds || opts.fontIds.includes(t.fontId) ? t.fontId : (opts.fontIds[0] ?? t.fontId);
     const layer = newLayer(adapter, t.positionId, {
@@ -211,9 +212,36 @@ export function templateLayers(
       threadColorId: t.threadColorId ?? opts.threadColorId ?? DEFAULT_TEXT_DESIGN.threadColorId,
       stitchStyle: t.stitchStyle ?? 'flat',
     });
-    out.push(t.role ? { ...layer, role: t.role } : layer);
-  }
-  return out;
+    const id = opts.ids?.[i];
+    const logo = t.logo ? findSampleLogo(t.logo) : undefined;
+    if (t.logo && !logo) return;
+    const withLogo: EditorLayer = logo
+      ? {
+          ...layer,
+          activeDesign: 'image',
+          image: {
+            type: 'image',
+            storageRef: null,
+            previewUrl: sampleLogoUrl(logo),
+            originalFilename: `${logo.id}-logo.png`,
+            mimeType: 'image/png',
+            byteSize: logo.svg.length,
+            widthPx: 512,
+            heightPx: 512,
+            backgroundRemoved: false,
+            stitchStyle: t.stitchStyle ?? 'flat',
+            scale: clamp(
+              (t.logoWidthCm ?? preset.defaultImageWidthCm) / preset.maxWidthCm,
+              LIMITS.minImageScale,
+              LIMITS.maxImageScale,
+            ),
+          },
+        }
+      : layer;
+    built.push({ ...withLogo, ...(id ? { id } : {}), ...(t.role ? { role: t.role } : {}) });
+  });
+  // Positions this garment/shop doesn't offer (e.g. Center Chest on a polo) move, not vanish.
+  return relocateLayers(adapter, built, opts.allowed).slice(0, opts.maxDesigns ?? LIMITS.maxDesigns);
 }
 
 /** The design that will actually be stitched for a layer. */
@@ -388,6 +416,16 @@ export function editorReducer(adapter: ModelAdapter) {
           fontId: source.fontId,
           threadColorId: source.threadColorId,
         });
+        if (action.image) {
+          // "Add logo": the new design starts as the uploaded artwork, sized for its position.
+          const preset = getPreset(adapter, positionId)!;
+          const image = {
+            ...action.image,
+            scale: clamp(preset.defaultImageWidthCm / preset.maxWidthCm, LIMITS.minImageScale, 1),
+          };
+          const withImage: EditorLayer = { ...layer, activeDesign: 'image', image };
+          return { ...state, layers: [...state.layers, withImage], activeLayerId: layer.id };
+        }
         return { ...state, layers: [...state.layers, layer], activeLayerId: layer.id };
       }
       case 'removeLayer': {

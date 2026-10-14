@@ -15,6 +15,7 @@ import {
   getPreset,
   getSurface,
   imageIntrinsicSize,
+  isSampleLogoUrl,
   positionsConflict,
   priceBreakdown,
   sizeTier,
@@ -25,6 +26,7 @@ import {
   withBulkDiscount,
   type DesignTemplate,
   type EmbroideryConfiguration,
+  type ImageDesign,
   type FeeCode,
   type ModelAdapter,
   type PlacementId,
@@ -75,7 +77,7 @@ import { PlacementStep } from './PlacementStep';
 import { ProductStep, isColorOption } from './ProductStep';
 import { ReviewStep, type ReviewLayer } from './ReviewStep';
 import { TeamOrderPanel, newTeamRow, type TeamRow } from './TeamOrderPanel';
-import { TemplatePicker } from './TemplatePicker';
+import { TemplatePicker, type TemplateSession } from './TemplatePicker';
 import { PriceBar } from './PriceBar';
 import { Viewer } from './Viewer';
 import { Notice } from './controls';
@@ -91,6 +93,8 @@ export interface ConfiguratorSettings {
   defaultText: string;
   defaultPositionId: PlacementId;
   defaultThreadColorId: string;
+  /** Garment colour option value to start on (e.g. "White"), unless a variant was chosen. */
+  defaultGarmentColor: string;
   fontIds: string[];
   threadColorIds: string[];
   positionIds: PlacementId[];
@@ -116,7 +120,8 @@ export const DEFAULT_SETTINGS: ConfiguratorSettings = {
   subtitle: 'Your name, your logo, your style. Create a piece that’s personal.',
   defaultText: 'YOUR NAME',
   defaultPositionId: 'left_chest',
-  defaultThreadColorId: 'white',
+  defaultThreadColorId: 'red',
+  defaultGarmentColor: 'White',
   fontIds: FONTS.map((f) => f.id),
   threadColorIds: THREAD_COLORS.map((c) => c.id),
   positionIds: ['left_chest', 'center_chest', 'right_chest', 'upper_back', 'center_back'],
@@ -218,6 +223,18 @@ function contrastRatio(a: string, b: string): number {
   return (l1 + 0.05) / (l2 + 0.05);
 }
 
+/** Renders an image URL (e.g. an SVG sample logo) to a transparent PNG file. */
+async function rasterizeToPng(url: string, name: string, size = 1024): Promise<File> {
+  const img = await decodeImage(url);
+  const c = document.createElement('canvas');
+  c.width = size;
+  c.height = size;
+  c.getContext('2d')?.drawImage(img, 0, 0, size, size);
+  const blob = await new Promise<Blob | null>((resolve) => c.toBlob(resolve, 'image/png'));
+  if (!blob) throw new Error('Could not prepare the logo. Please try again.');
+  return new File([blob], name, { type: 'image/png' });
+}
+
 function decodeImage(url: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const img = new Image();
@@ -260,6 +277,14 @@ function useArtworkMap(urls: string[]): Map<string, CanvasImageSource> {
   return map;
 }
 
+/** First available variant in the default garment colour (any size), if the product has it. */
+function defaultColorVariant(product: ProductContext, color: string): string | undefined {
+  const idx = product.options.findIndex((o) => isColorOption(o.name));
+  if (idx < 0 || !color) return undefined;
+  const want = color.trim().toLowerCase();
+  return product.variants.find((v) => v.available && v.options[idx]?.toLowerCase() === want)?.id;
+}
+
 const sizeOptionOf = (product: ProductContext) =>
   product.options.find((o) => /size/i.test(o.name))?.name ?? null;
 
@@ -272,7 +297,8 @@ export function Configurator(props: ConfiguratorProps) {
   const makeInitial = useCallback(
     () =>
       initialEditorState(adapter, product, props.modelUrl, {
-        variantId: props.initialVariantId ?? undefined,
+        variantId:
+          props.initialVariantId ?? defaultColorVariant(product, settings.defaultGarmentColor),
         text: settings.defaultText,
         positionId: settings.defaultPositionId,
         threadColorId: settings.defaultThreadColorId,
@@ -755,6 +781,12 @@ export function Configurator(props: ConfiguratorProps) {
     [],
   );
 
+  /** Clicking a design on the 3D garment selects it (and opens it for editing from Product/Review). */
+  const onDesignClick = (layerId: string) => {
+    dispatch({ type: 'selectLayer', layerId });
+    if (stateRef.current.step === 0 || stateRef.current.step === 3) goTo(1);
+  };
+
   const releaseUrl = (url: string | null | undefined) => {
     if (url && files.current.has(url)) {
       URL.revokeObjectURL(url);
@@ -762,33 +794,34 @@ export function Configurator(props: ConfiguratorProps) {
     }
   };
 
-  const onUpload = async (file: File): Promise<string | null> => {
+  /** Checks and decodes an upload; on success it's registered for upload at add-to-cart. */
+  const prepareImage = async (file: File): Promise<{ image: ImageDesign } | { error: string }> => {
     const header = new Uint8Array(await file.slice(0, 16).arrayBuffer());
     const check = checkUpload(file, header, settings.maxUploadBytes);
-    if (!check.ok || !check.mime) return check.message ?? 'Unsupported file.';
+    if (!check.ok || !check.mime) return { error: check.message ?? 'Unsupported file.' };
     const url = URL.createObjectURL(file);
     let img: HTMLImageElement;
     try {
       img = await decodeImage(url);
     } catch {
       URL.revokeObjectURL(url);
-      return 'We couldn’t read this image. It may be damaged — try exporting it again.';
+      return { error: 'We couldn’t read this image. It may be damaged — try exporting it again.' };
     }
     const { naturalWidth: w, naturalHeight: h } = img;
     if (w < LIMITS.minImagePx || h < LIMITS.minImagePx) {
       URL.revokeObjectURL(url);
-      return `This image is only ${w}×${h}px. Use at least ${LIMITS.minImagePx}px on each side for a clean result.`;
+      return {
+        error: `This image is only ${w}×${h}px. Use at least ${LIMITS.minImagePx}px on each side for a clean result.`,
+      };
     }
     if (w > LIMITS.maxImagePx || h > LIMITS.maxImagePx) {
       URL.revokeObjectURL(url);
-      return `This image is ${w}×${h}px. Please keep it under ${LIMITS.maxImagePx}px on each side.`;
+      return {
+        error: `This image is ${w}×${h}px. Please keep it under ${LIMITS.maxImagePx}px on each side.`,
+      };
     }
-    releaseUrl(layer.image?.previewUrl);
-    originals.current.delete(layer.id);
     files.current.set(url, file);
-    const preset = getPreset(adapter, layer.placement.positionId)!;
-    dispatch({
-      type: 'setImage',
+    return {
       image: {
         type: 'image',
         storageRef: null,
@@ -798,8 +831,24 @@ export function Configurator(props: ConfiguratorProps) {
         byteSize: file.size,
         widthPx: w,
         heightPx: h,
-        scale: Math.min(1, preset.defaultImageWidthCm / preset.maxWidthCm),
+        scale: 0.5,
         backgroundRemoved: false,
+      },
+    };
+  };
+
+  /** Upload artwork onto the selected design. */
+  const onUpload = async (file: File): Promise<string | null> => {
+    const prepared = await prepareImage(file);
+    if ('error' in prepared) return prepared.error;
+    releaseUrl(layer.image?.previewUrl);
+    originals.current.delete(layer.id);
+    const preset = getPreset(adapter, layer.placement.positionId)!;
+    dispatch({
+      type: 'setImage',
+      image: {
+        ...prepared.image,
+        scale: Math.min(1, preset.defaultImageWidthCm / preset.maxWidthCm),
       },
     });
     setToast({
@@ -807,6 +856,27 @@ export function Configurator(props: ConfiguratorProps) {
       message: `${file.name} is on the shirt. Adjust its size or placement.`,
     });
     return null;
+  };
+
+  /** "+ Add logo" (any step): a new design that starts as the uploaded artwork. */
+  const onAddLogo = async (file: File) => {
+    const prepared = await prepareImage(file);
+    if ('error' in prepared) {
+      setToast({ tone: 'error', message: prepared.error });
+      return;
+    }
+    dispatch({ type: 'addLayer', allowed: settings.positionIds, image: prepared.image });
+    if (stateRef.current.step === 0 || stateRef.current.step === 3) goTo(1);
+    setToast({
+      tone: 'success',
+      message: `${file.name} added as a new design. Move it on the shirt or change its position.`,
+    });
+  };
+
+  /** "+ Add text" (any step): a new text design, opened for typing. */
+  const onAddText = () => {
+    dispatch({ type: 'addLayer', allowed: settings.positionIds });
+    if (stateRef.current.step !== 1) goTo(1);
   };
 
   /** Remove (tolerance) or restore (null) the active logo's background. Works from the original upload. */
@@ -909,14 +979,20 @@ export function Configurator(props: ConfiguratorProps) {
         continue;
       }
       setBusy('Saving artwork…');
-      const file = l.image.previewUrl ? files.current.get(l.image.previewUrl) : undefined;
+      let file = l.image.previewUrl ? files.current.get(l.image.previewUrl) : undefined;
+      // Built-in template logos are vector art: stored as a 1024px PNG like any upload.
+      if (!file && isSampleLogoUrl(l.image.previewUrl)) {
+        file = await rasterizeToPng(l.image.previewUrl!, l.image.originalFilename);
+        files.current.set(l.image.previewUrl!, file);
+      }
       if (!file) throw new Error('Please upload your artwork again.');
       const stored = await persistence.uploadArtwork(file, {
         filename: file.name,
         mimeType: l.image.mimeType,
       });
-      dispatch({ type: 'updateImage', layerId: l.id, patch: { storageRef: stored.storageRef } });
-      out.push({ ...l, image: { ...l.image, storageRef: stored.storageRef } });
+      const patch = { storageRef: stored.storageRef, byteSize: file.size };
+      dispatch({ type: 'updateImage', layerId: l.id, patch });
+      out.push({ ...l, image: { ...l.image, ...patch } });
     }
     return out;
   };
@@ -1221,9 +1297,11 @@ export function Configurator(props: ConfiguratorProps) {
         adapter={adapter}
         layers={state.layers}
         activeLayerId={layer.id}
+        maxDesigns={maxDesigns}
         canAdd={canAddLayer}
         onSelect={(layerId) => dispatch({ type: 'selectLayer', layerId })}
-        onAdd={() => dispatch({ type: 'addLayer', allowed: settings.positionIds })}
+        onAddText={onAddText}
+        onAddLogo={(f) => void onAddLogo(f)}
         onRemove={(layerId) => {
           const removed = state.layers.find((l) => l.id === layerId);
           releaseUrl(removed?.image?.previewUrl);
@@ -1249,31 +1327,102 @@ export function Configurator(props: ConfiguratorProps) {
     });
   };
 
-  const applyTemplate = (template: DesignTemplate, values: Record<string, string>) => {
-    const layers = templateLayers(adapter, template, values, {
-      allowed: settings.positionIds,
-      fontIds: settings.fontIds,
-      threadColorId: layer.text.threadColorId,
-      maxDesigns,
+  /* ---------------- templates: applied live, undoable ---------------- */
+  const [tplSession, setTplSession] = useState<
+    (TemplateSession & { ids: string[]; snapshot: EditorLayer[]; thread: string }) | null
+  >(null);
+  const templateOpts = { allowed: settings.positionIds, fontIds: settings.fontIds, maxDesigns };
+  const layersOf = (
+    t: DesignTemplate,
+    values: Record<string, string> = {},
+    extra: { ids?: string[]; thread?: string } = {},
+  ) =>
+    templateLayers(adapter, t, values, {
+      ...templateOpts,
+      ids: extra.ids,
+      threadColorId: extra.thread ?? tplSession?.thread ?? layer.text.threadColorId,
     });
+  const pickTemplate = (t: DesignTemplate) => {
+    const values = Object.fromEntries(t.fields.map((f) => [f.key, f.defaultValue]));
+    const thread = tplSession?.thread ?? layer.text.threadColorId;
+    const layers = layersOf(t, values, { thread });
     if (!layers.length) return;
-    for (const l of state.layers) releaseUrl(l.image?.previewUrl);
-    originals.current.clear();
     dispatch({ type: 'applyTemplate', layers });
     setStepError(null);
-    setToast({
-      tone: 'success',
-      message: `“${template.label}” applied. Edit any design below, or continue to placement.`,
+    setTplSession({
+      id: t.id,
+      values,
+      ids: layers.map((l) => l.id),
+      // Keep the design from before the FIRST template, so Undo always goes back to it.
+      snapshot: tplSession?.snapshot ?? state.layers,
+      thread,
     });
   };
+  const editTemplate = (values: Record<string, string>) => {
+    const t = tplSession && DESIGN_TEMPLATES.find((x) => x.id === tplSession.id);
+    if (!t || !tplSession) return;
+    const layers = layersOf(t, values, { ids: tplSession.ids });
+    if (layers.length) dispatch({ type: 'applyTemplate', layers });
+    setTplSession({ ...tplSession, values });
+  };
+  const undoTemplate = () => {
+    if (!tplSession) return;
+    dispatch({ type: 'applyTemplate', layers: tplSession.snapshot });
+    setTplSession(null);
+    setToast({ tone: 'info', message: 'Template undone — your previous design is back.' });
+  };
+  const finishTemplate = () => {
+    if (!tplSession) return;
+    // Logos replaced by the template are gone for good now: free their previews.
+    const kept = new Set(stateRef.current.layers.map((l) => l.image?.previewUrl));
+    for (const l of tplSession.snapshot)
+      if (l.image?.previewUrl && !kept.has(l.image.previewUrl)) releaseUrl(l.image.previewUrl);
+    setTplSession(null);
+  };
+  // Leaving the Design step settles the template.
+  useEffect(() => {
+    if (state.step !== 1) finishTemplate();
+  }, [state.step]);
+
+  /** Embroidery price of each template on this garment (sizes measured like the real design). */
+  const templatePrices = useRef(new Map<string, string | null>());
+  const scratchRasterizer = useRef<DesignRasterizer | null>(null);
+  const priceOfTemplate = (t: DesignTemplate): string | null => {
+    const key = `${adapter.id}|${fontsTick}|${t.id}`;
+    if (templatePrices.current.has(key)) return templatePrices.current.get(key)!;
+    scratchRasterizer.current ??= new DesignRasterizer();
+    const designs = layersOf(t).map((l) => {
+      const r = resolvePlacement(
+        adapter,
+        l.placement,
+        scratchRasterizer.current!.measureTextSize(l.text),
+      );
+      return { design: l.text, rendered: { widthCm: r.widthCm, heightCm: r.heightCm } };
+    });
+    const fees = priceBreakdown(designs, 0, 1, pricing).perItem;
+    const label = fees > 0 ? `+${money(fees)}` : null;
+    templatePrices.current.set(key, label);
+    return label;
+  };
+
+  const pristine =
+    state.layers.length === 1 &&
+    state.layers[0]!.activeDesign === 'text' &&
+    state.layers[0]!.text.text === settings.defaultText;
   const templatePicker = settings.templates ? (
     <TemplatePicker
       adapter={adapter}
-      templates={DESIGN_TEMPLATES.filter(
-        (t) =>
-          templateLayers(adapter, t, {}, { allowed: settings.positionIds, maxDesigns }).length > 0,
-      )}
-      onApply={applyTemplate}
+      templates={DESIGN_TEMPLATES.filter((t) => layersOf(t).length > 0)}
+      layersOf={(t, values) => layersOf(t, values)}
+      shirtHex={garmentHex ?? garmentInfo?.originalColorHex ?? '#2c4aa6'}
+      threadHex={(id) => findThreadColor(id)?.hex ?? '#ffffff'}
+      priceOf={priceOfTemplate}
+      session={tplSession}
+      onPick={pickTemplate}
+      onValues={editTemplate}
+      onUndo={undoTemplate}
+      onDone={finishTemplate}
+      defaultOpen={pristine}
     />
   ) : null;
   const reviewLayers: ReviewLayer[] = state.layers.map((l) => ({
@@ -1384,6 +1533,7 @@ export function Configurator(props: ConfiguratorProps) {
             modelUrl={props.modelUrl}
             onViewer={onViewer}
             onDesignDrag={onDesignDrag}
+            onDesignClick={onDesignClick}
             designSurface={activeLayout?.raster ? facingSurface : null}
             dragHint={state.step === 2}
             modelLabel={product.title}
@@ -1469,15 +1619,13 @@ export function Configurator(props: ConfiguratorProps) {
                 ) : null}
               </>
             ) : null}
+            {/* A sibling of the per-design (keyed) DesignStep, so switching or replacing designs
+                doesn't reset its open state / category filter. */}
+            {state.step === 1 ? <div class="emb-stack">{templatePicker}</div> : null}
             {state.step === 1 ? (
               <DesignStep
                 key={layer.id}
-                header={
-                  <>
-                    {templatePicker}
-                    {layerBar}
-                  </>
-                }
+                header={layerBar}
                 maxTextSizeCm={Math.min(
                   LIMITS.maxTextSizeCm,
                   getPreset(adapter, layer.placement.positionId)?.maxHeightCm ??
@@ -1569,6 +1717,22 @@ export function Configurator(props: ConfiguratorProps) {
                     onChange={setTeamRows}
                     rowError={teamRowError}
                   />
+                }
+                addDesign={
+                  maxDesigns > 1 ? (
+                    <LayerBar
+                      actionsOnly
+                      adapter={adapter}
+                      layers={state.layers}
+                      activeLayerId={layer.id}
+                      maxDesigns={maxDesigns}
+                      canAdd={canAddLayer}
+                      onSelect={(layerId) => dispatch({ type: 'selectLayer', layerId })}
+                      onAddText={onAddText}
+                      onAddLogo={(f) => void onAddLogo(f)}
+                      onRemove={() => undefined}
+                    />
+                  ) : null
                 }
                 onQuantity={(quantity) => dispatch({ type: 'setQuantity', quantity })}
                 onEdit={(step, layerId) => {

@@ -39,61 +39,35 @@ interface Props {
   onShare: () => void;
   onQuantity: (q: number) => void;
   onEdit: (step: 0 | 1 | 2, layerId?: string) => void;
+  /** "Add text / Add logo" shortcuts under the summary. */
+  addDesign?: ComponentChildren;
 }
 
-type Row = [label: string, value: string, step: 0 | 1 | 2, layerId?: string];
-
-function designRows(layer: ReviewLayer, prefix: string): Row[] {
+/** One compact line set per design: what is stitched, then where and how. */
+function designSummary(layer: ReviewLayer): { main: string; where: string; how: string } {
   const d = layer.design;
-  const rows: Row[] = [];
-  if (d.type === 'text') {
-    rows.push([`${prefix}Text`, textLines(d.text).join(' / ') || '—', 1, layer.layerId]);
-    rows.push([
-      `${prefix}Style`,
-      `${findFont(d.fontId)?.label ?? d.fontId} · ${findThreadColor(d.threadColorId)?.label ?? d.threadColorId} thread · ${findStitchStyle(d.stitchStyle).label}`,
-      1,
-      layer.layerId,
-    ]);
-  } else {
-    rows.push([
-      `${prefix}Logo`,
-      d.originalFilename + (d.backgroundRemoved ? ' (background removed)' : ''),
-      1,
-      layer.layerId,
-    ]);
-    rows.push([
-      `${prefix}Style`,
-      `${findStitchStyle(d.stitchStyle).label} · thread colours matched to your artwork`,
-      1,
-      layer.layerId,
-    ]);
-  }
-  if (layer.resolved) {
-    rows.push([
-      `${prefix}Position`,
-      `${layer.resolved.preset.label} · ${formatDimensions(layer.resolved.widthCm, layer.resolved.heightCm)}${layer.rotationDeg ? ` · ${layer.rotationDeg}°` : ''}`,
-      2,
-      layer.layerId,
-    ]);
-  }
-  return rows;
+  const where = layer.resolved
+    ? `${layer.resolved.preset.label} · ${formatDimensions(layer.resolved.widthCm, layer.resolved.heightCm)}${layer.rotationDeg ? ` · ${layer.rotationDeg}°` : ''}`
+    : '';
+  if (d.type === 'text')
+    return {
+      main: `“${textLines(d.text).join(' / ') || '—'}”`,
+      where,
+      how: `${findFont(d.fontId)?.label ?? d.fontId} · ${findThreadColor(d.threadColorId)?.label ?? d.threadColorId} thread · ${findStitchStyle(d.stitchStyle).label}`,
+    };
+  return {
+    main: d.originalFilename + (d.backgroundRemoved ? ' (background removed)' : ''),
+    where,
+    how: `Logo · ${findStitchStyle(d.stitchStyle).label} · colours matched to your artwork`,
+  };
 }
 
 export function ReviewStep(p: Props) {
   const variant = p.product.variants.find((v) => v.id === p.selection.variantId);
-  const many = p.layers.length > 1;
-  const rows: Row[] = [
-    [
-      'Product',
-      `${p.product.title}${variant && p.orderMode === 'single' ? ` — ${variant.title}` : ''}`,
-      0,
-    ],
-    ...p.layers.flatMap((l, i) => designRows(l, many ? `Design ${i + 1} · ` : '')),
-  ];
 
   return (
     <div class="emb-stack">
-      <div class="emb-review">
+      <div class="emb-review" data-testid="review-summary">
         {p.thumbnail ? (
           <img
             class="emb-review__thumb"
@@ -102,24 +76,48 @@ export function ReviewStep(p: Props) {
             data-testid="review-thumb"
           />
         ) : null}
-        <dl class="emb-summary" data-testid="review-summary">
-          {rows.map(([k, v, step, layerId]) => (
-            <div class="emb-summary__row" key={k}>
-              <dt>{k}</dt>
-              <dd>
-                <span>{v}</span>
-                <button
-                  type="button"
-                  class="emb-link"
-                  onClick={() => p.onEdit(step, layerId)}
-                  aria-label={`Edit ${k.toLowerCase()}`}
-                >
-                  Edit
-                </button>
-              </dd>
+        <div class="emb-review__body">
+          <div class="emb-review__product">
+            <div>
+              <strong>{p.product.title}</strong>
+              {variant && p.orderMode === 'single' ? <span>{variant.title}</span> : null}
             </div>
-          ))}
-        </dl>
+            <button
+              type="button"
+              class="emb-link"
+              onClick={() => p.onEdit(0)}
+              aria-label="Edit product"
+            >
+              Edit
+            </button>
+          </div>
+          <ol class="emb-review__designs">
+            {p.layers.map((l, i) => {
+              const d = designSummary(l);
+              return (
+                <li class="emb-rdesign" key={l.layerId}>
+                  <span class="emb-rdesign__num" aria-hidden="true">
+                    {i + 1}
+                  </span>
+                  <div class="emb-rdesign__text">
+                    <p class="emb-rdesign__main">{d.main}</p>
+                    {d.where ? <p class="emb-rdesign__meta">{d.where}</p> : null}
+                    <p class="emb-rdesign__meta">{d.how}</p>
+                  </div>
+                  <button
+                    type="button"
+                    class="emb-link"
+                    onClick={() => p.onEdit(1, l.layerId)}
+                    aria-label={`Edit design ${i + 1}`}
+                  >
+                    Edit
+                  </button>
+                </li>
+              );
+            })}
+          </ol>
+          {p.addDesign}
+        </div>
       </div>
 
       {p.canTeam ? (

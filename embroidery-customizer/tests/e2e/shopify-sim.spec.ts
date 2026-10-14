@@ -36,7 +36,7 @@ test('Shopify path: lazy loader mounts, adds real variant with properties, edits
     'Embroidery Type': 'Text',
     'Embroidery Text': 'YOUR NAME',
     Placement: 'Left Chest',
-    'Thread Color': 'White',
+    'Thread Color': 'Red', // default thread colour
   });
   expect(body.items[0]!.properties['_Embroidery Config Ref']).toMatch(/^cfg_/);
   // a 3D mockup (front view) is stored for the order email, linked by an absolute URL

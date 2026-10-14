@@ -144,7 +144,9 @@
       "maxDesigns": {{ s.max_designs | default: 4 | json }},
       "teamOrders": {{ s.enable_team_orders | json }},
       "sharing": {{ s.enable_sharing | json }},
-      "templates": {{ s.enable_templates | json }}
+      "templates": {{ s.enable_templates | json }},
+      "defaultGarmentColor": {{ s.default_garment_color | json }},
+      "defaultThreadColorId": {{ s.default_thread_color | json }}
     }
   }
 </script>
