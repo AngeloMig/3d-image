@@ -14,6 +14,13 @@
       "settings": {
         "product": "custom-embroidered-t-shirt",
         "fee_product": "embroidery-fee",
+        "model_profile": "crew-tee",
+        "product_2": "embroidered-polo",
+        "model_profile_2": "polo",
+        "product_3": "long-sleeve-embroidered-tee",
+        "model_profile_3": "long-sleeve",
+        "product_4": "sport-raglan-tee",
+        "model_profile_4": "sport-tee",
         "display": "inline",
         "heading": "Make it yours.",
         "default_text": "YOUR NAME",

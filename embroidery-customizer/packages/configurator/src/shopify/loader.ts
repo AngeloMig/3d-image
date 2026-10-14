@@ -10,7 +10,10 @@ const loaded = new Map<string, Promise<EntryModule>>();
 const loadModule = (src: string): Promise<EntryModule> => {
   let p = loaded.get(src);
   if (!p) {
-    p = import(/* @vite-ignore */ src) as Promise<EntryModule>;
+    // Liquid's asset_url is protocol-relative ("//shop/cdn/…"). import() from this classic,
+    // cross-origin script resolves against about:blank and fails, so make the URL absolute.
+    const url = new URL(src, document.baseURI).href;
+    p = import(/* @vite-ignore */ url) as Promise<EntryModule>;
     loaded.set(src, p);
   }
   return p;
